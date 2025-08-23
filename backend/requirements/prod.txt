@@ -1,0 +1,6 @@
+# requirements/prod.txt
+-r base.txt
+gunicorn==21.2.0
+uvloop==0.17.0
+httptools==0.6.0
+python-multipart==0.0.6

@@ -1,10 +1,33 @@
 [project]
-name = "backend"
+name = "foxmask"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "apscheduler>=3.11.0",
     "fastapi>=0.116.1",
+    "gunicorn>=23.0.0",
+    "kafka-python>=2.2.15",
+    "minio>=7.2.16",
+    "motor>=3.7.1",
+    "neo4j>=5.28.2",
+    "passlib>=1.7.4",
+    "pydantic>=2.11.7",
+    "pydantic-settings>=2.10.1",
+    "python-dotenv>=1.1.1",
+    "python-jose>=3.5.0",
+    "python-multipart>=0.0.20",
+    "redis>=6.4.0",
+    "strawberry-graphql[fastapi]==0.280.0",
     "uvicorn>=0.35.0",
+    "weaviate-client>=4.16.9",
+]
+
+[dependency-groups]
+dev = [
+    "black>=25.1.0",
+    "mypy>=1.17.1",
+    "pytest>=8.4.1",
+    "ruff>=0.12.10",
 ]
