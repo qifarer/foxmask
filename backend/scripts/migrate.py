@@ -7,7 +7,7 @@ import os
 # Add the app directory to the path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from app.infrastructure.database import connect_to_mongo, get_database
+from foxmask.core.database import connect_to_mongo, get_database
 
 async def migrate_database():
     """Perform database migrations"""
@@ -20,7 +20,7 @@ async def migrate_database():
     print("Database migrations completed successfully")
     
     # Close connection
-    from app.infrastructure.database import close_mongo_connection
+    from foxmask.core.database import close_mongo_connection
     await close_mongo_connection()
 
 if __name__ == "__main__":

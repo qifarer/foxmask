@@ -1,4 +1,4 @@
-# app/domains/document/__init__.py
+# foxmask/document/__init__.py
 from .models import Document, DocumentStatus
 from .schemas import DocumentCreate, DocumentResponse, DocumentUpdate
 from .services import DocumentService

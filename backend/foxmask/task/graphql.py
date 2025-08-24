@@ -1,36 +1,38 @@
-# app/domains/task/models.py
-from enum import Enum
-from pydantic import BaseModel, Field
-from datetime import datetime
-from typing import Optional, Dict, Any
-import uuid
+# foxmask/task/graphql.py
+import strawberry
+from typing import List, Optional
+from foxmask.task.models import Task, TaskStatus, TaskType
+from foxmask.task.services import TaskService
+from foxmask.auth.dependencies import get_current_user
 
-class TaskType(str, Enum):
-    DOCUMENT_PARSING = "document_parsing"
-    VECTORIZATION = "vectorization"
-    RELATION_EXTRACTION = "relation_extraction"
-
-class TaskStatus(str, Enum):
-    PENDING = "pending"
-    PROCESSING = "processing"
-    COMPLETED = "completed"
-    FAILED = "failed"
-
-class Task(BaseModel):
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    type: TaskType
-    status: TaskStatus = TaskStatus.PENDING
+@strawberry.type
+class Task:
+    id: strawberry.ID
+    type: str
+    status: str
     document_id: str
     owner: str
-    details: Dict[str, Any] = Field(default_factory=dict)
-    result: Optional[Dict[str, Any]] = None
-    error: Optional[str] = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
-    completed_at: Optional[datetime] = None
-    
-    class Config:
-        use_enum_values = True
-        json_encoders = {
-            datetime: lambda v: v.isoformat()
-        }
+    created_at: str
+    updated_at: str
+
+@strawberry.type
+class TaskMutation:
+    @strawberry.mutation
+    async def create_task(self, info, task_type: str, document_id: str) -> Task:
+        user = await get_current_user(info.context["request"])
+        service = TaskService()
+        task = await service.create_task(
+            TaskType(task_type),
+            document_id,
+            user.id
+        )
+        return Task(**task.dict())
+
+@strawberry.type
+class TaskQuery:
+    @strawberry.field
+    async def tasks(self, info, document_id: Optional[str] = None) -> List[Task]:
+        user = await get_current_user(info.context["request"])
+        service = TaskService()
+        tasks = await service.list_tasks(user.id, document_id)
+        return [Task(**task.dict()) for task in tasks]

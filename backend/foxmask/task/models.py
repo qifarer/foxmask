@@ -1,4 +1,4 @@
-# backend/app/task/models.py
+# backend/foxmask/task/models.py
 from enum import Enum
 from pydantic import BaseModel, Field
 from datetime import datetime

@@ -1,4 +1,4 @@
-# app/core/exceptions.py
+# foxmask/core/exceptions.py
 from fastapi import HTTPException, status
 
 class FoxmaskException(HTTPException):
@@ -21,10 +21,7 @@ class ServiceError(FoxmaskException):
     def __init__(self, detail: str = "Service error"):
         super().__init__(detail, status_code=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-class AuthenticationError(FoxmaskException):
-    def __init__(self, detail: str = "Authentication failed"):
-        super().__init__(
-            detail, 
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            headers={"WWW-Authenticate": "Bearer"}
-        )
+
+class AuthenticationError(HTTPException):
+    def __init__(self, status_code=401, detail="Unauthorized", headers=None):
+        super().__init__(status_code=status_code, detail=detail, headers=headers)        

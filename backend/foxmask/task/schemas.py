@@ -1,4 +1,4 @@
-# app/domains/task/schemas.py
+# foxmask/task/schemas.py
 from pydantic import BaseModel
 from datetime import datetime
 from typing import Optional, Dict, Any

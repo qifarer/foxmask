@@ -7,8 +7,8 @@ import os
 # Add the app directory to the path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from app.infrastructure.database import connect_to_mongo, get_database
-from app.core.config import get_settings
+from foxmask.core.database import connect_to_mongo, get_database
+from foxmask.core.config import get_settings
 
 async def init_database():
     """Initialize database with collections and indexes"""
@@ -34,7 +34,7 @@ async def init_database():
     print("Database initialized successfully")
     
     # Close connection
-    from app.infrastructure.database import close_mongo_connection
+    from foxmask.core.database import close_mongo_connection
     await close_mongo_connection()
 
 if __name__ == "__main__":

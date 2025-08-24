@@ -1,9 +1,11 @@
-# app/core/tracking.py
+# foxmask/core/tracking.py
+import time
 from datetime import datetime
 from enum import Enum
 from typing import Dict, Any, Optional, List
 from pydantic import BaseModel, Field
 import uuid
+from functools import wraps
 from foxmask.core.database import get_database
 from foxmask.core.config import get_settings
 from foxmask.auth.schemas import User
@@ -64,9 +66,12 @@ class TrackingService:
         self.db = get_database()
     
     async def log_event(self, event: AuditEvent):
-        """记录审计事件"""
+        if not self.db:
+            # 可以打个 warning 日志，而不是直接报错
+            # logger.warning("TrackingService DB not initialized, skipping audit log.")
+            return
         await self.db.audit_events.insert_one(event.dict())
-    
+        
     async def log_api_call(
         self,
         method: str,
@@ -249,3 +254,74 @@ class TrackingService:
 
 # 全局跟踪服务实例
 tracking_service = TrackingService()
+
+# 性能监控装饰器
+def track_performance(event_name: str):
+    """性能监控装饰器"""
+    def decorator(func):
+        @wraps(func)
+        async def wrapper(*args, **kwargs):
+            start_time = time.time()
+            
+            try:
+                result = await func(*args, **kwargs)
+                duration_ms = int((time.time() - start_time) * 1000)
+                
+                # 提取用户信息（如果存在）
+                user = None
+                for arg in args:
+                    if hasattr(arg, 'id') and hasattr(arg, 'username'):
+                        user = arg
+                        break
+                
+                if not user:
+                    for key, value in kwargs.items():
+                        if hasattr(value, 'id') and hasattr(value, 'username'):
+                            user = value
+                            break
+                
+                # 记录性能事件
+                await tracking_service.log_event(
+                    AuditEvent(
+                        event_type=EventType.SYSTEM_EVENT,
+                        event_level=EventLevel.INFO,
+                        user_id=user.id if user else None,
+                        username=user.username if user else None,
+                        action=event_name,
+                        details={
+                            "function": func.__name__,
+                            "duration_ms": duration_ms,
+                            "module": func.__module__
+                        },
+                        duration_ms=duration_ms,
+                        success=True
+                    )
+                )
+                
+                return result
+                
+            except Exception as e:
+                duration_ms = int((time.time() - start_time) * 1000)
+                
+                # 记录错误事件
+                await tracking_service.log_event(
+                    AuditEvent(
+                        event_type=EventType.SYSTEM_EVENT,
+                        event_level=EventLevel.ERROR,
+                        action=event_name,
+                        details={
+                            "function": func.__name__,
+                            "duration_ms": duration_ms,
+                            "module": func.__module__,
+                            "error": str(e)
+                        },
+                        duration_ms=duration_ms,
+                        success=False,
+                        error_message=str(e)
+                    )
+                )
+                
+                raise
+        
+        return wrapper
+    return decorator

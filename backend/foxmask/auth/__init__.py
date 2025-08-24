@@ -1,4 +1,4 @@
-# app/domains/auth/__init__.py
+# foxmask/auth/__init__.py
 from .dependencies import get_current_user, get_current_active_user
 from .models import User
 from .schemas import User, Token, TokenData

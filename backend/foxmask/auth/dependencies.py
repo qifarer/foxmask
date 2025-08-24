@@ -1,4 +1,4 @@
-# foxmask/domains/auth/dependencies.py
+# foxmask/auth/dependencies.py
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, OAuth2PasswordBearer
 from jose import JWTError, jwt
@@ -17,10 +17,11 @@ async def get_current_user(token: str = Depends(oauth2_scheme)) -> User:
     )
     
     try:
+        # 使用正确的密钥和算法
         payload = jwt.decode(
             token,
-            settings.CASDOOR_CERT or settings.SECRET_KEY,
-            algorithms=["RS256" if settings.CASDOOR_CERT else "HS256"],
+            settings.SECRET_KEY,
+            algorithms=["HS256"],
             options={"verify_aud": False}
         )
         user_id: str = payload.get("sub")

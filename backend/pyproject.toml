@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "apscheduler>=3.11.0",
+    "email-validator>=2.2.0",
     "fastapi>=0.116.1",
     "gunicorn>=23.0.0",
     "kafka-python>=2.2.15",

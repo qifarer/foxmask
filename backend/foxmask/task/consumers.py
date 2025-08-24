@@ -1,4 +1,4 @@
-# app/domains/task/consumers.py
+# foxmask/task/consumers.py
 import asyncio
 import json
 from foxmask.core.kafka import KafkaConsumer

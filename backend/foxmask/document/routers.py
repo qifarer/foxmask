@@ -1,4 +1,4 @@
-# foxmask/domains/document/routers.py
+# foxmask/document/routers.py
 from fastapi import APIRouter, Depends, HTTPException, status
 from typing import List, Optional
 from foxmask.auth.dependencies import get_current_user

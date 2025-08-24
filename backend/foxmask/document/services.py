@@ -1,4 +1,4 @@
-# app/domains/document/services.py (增强版)
+# foxmask/document/services.py (增强版)
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 from foxmask.core.database import get_database

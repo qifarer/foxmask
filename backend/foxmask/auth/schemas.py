@@ -1,4 +1,4 @@
-# app/domains/auth/schemas.py
+# foxmask/auth/schemas.py
 from pydantic import BaseModel, EmailStr
 from typing import Optional
 

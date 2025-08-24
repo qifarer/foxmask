@@ -1,4 +1,4 @@
-# app/main.py (更新版)
+# foxmask/main.py
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import strawberry
@@ -88,7 +88,7 @@ async def health_check():
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(
-        "app.main:app",
+        "foxmask.main:app",
         host=settings.HOST,
         port=settings.PORT,
         reload=settings.DEBUG

@@ -1,4 +1,4 @@
-# app/domains/file/schemas.py
+# foxmask/file/schemas.py
 from pydantic import BaseModel
 from datetime import datetime
 from typing import Optional, List

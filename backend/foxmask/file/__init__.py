@@ -1,4 +1,4 @@
-# app/domains/file/__init__.py
+# foxmask/file/__init__.py
 from .models import FileMetadata, FileStatus, FileChunk
 from .schemas import FileUploadResponse, FileListResponse
 from .services import FileService

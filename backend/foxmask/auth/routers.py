@@ -1,4 +1,4 @@
-# app/domains/auth/routers.py
+# foxmask/auth/routers.py
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
 from foxmask.auth.dependencies import get_current_active_user

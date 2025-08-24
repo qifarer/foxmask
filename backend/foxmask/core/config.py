@@ -1,4 +1,4 @@
-# app/core/config.py
+# foxmask/core/config.py
 from pydantic_settings import BaseSettings
 from pydantic import Field, RedisDsn, AnyUrl
 from typing import List, Optional
