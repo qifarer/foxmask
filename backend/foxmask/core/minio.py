@@ -21,3 +21,7 @@ async def ensure_bucket_exists(minio_client: Minio, bucket_name: str = None):
             print(f"Created bucket: {bucket_name}")
     except S3Error as e:
         print(f"Error creating bucket {bucket_name}: {e}")
+
+
+
+minio_client = get_minio_client()

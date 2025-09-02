@@ -1,0 +1,14 @@
+{
+  "name": "@foxmask/prompts",
+  "version": "1.0.0",
+  "private": true,
+  "main": "./src/index.ts",
+  "scripts": {
+    "test": "vitest",
+    "test:coverage": "vitest --coverage"
+  },
+  "dependencies": {
+    "@foxmask/const": "workspace:*",
+    "@foxmask/types": "workspace:*"
+  }
+}

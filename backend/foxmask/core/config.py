@@ -15,14 +15,34 @@ class Settings(BaseSettings):
     
     # Server
     HOST: str = Field(default="0.0.0.0", env="HOST")
-    PORT: int = Field(default=8000, env="PORT")
+    PORT: int = Field(default=8888, env="PORT")
     
+    SUPPORTED_FILE_TYPES: list = ["image/", "text/", "application/json"]
+    MAX_FILE_SIZE: int = 100 * 1024 * 1024  # 100MB
+    UPLOAD_DIRECTORY: str = "uploads"
+    CHUNK_SIZE: int = 8 * 1024 * 1024  # 8MB chunks for streaming
+
     # MongoDB
-    MONGODB_URI: str = Field(
+    MONGO_URI: str = Field(
         default="mongodb://localhost:27017", 
-        env="MONGODB_URI"
+        env="MONGO_URI"
     )
-    MONGODB_DB: str = Field(default="foxmask", env="MONGODB_DB")
+    MONGO_DB: str = Field(default="foxmask", env="MONGO_DB")
+    MONGO_FILE_COLLECTION: str = Field(
+        default="files", 
+        env="MONGO_FILE_COLLECTION"
+    )
+    MONGO_DOCS_COLLECTION: str = Field(
+        default="documents", 
+        env="MONGO_DOCS_COLLECTION"
+    )
+    MONGO_KB_COLLECTION: str = Field(
+        default="knowledge_bases", 
+        env="MONGO_KB_COLLECTION"
+    )
+    MONGO_USERNAME: Optional[str] = Field(default=None, env="MONGO_USERNAME")
+    MONGO_PASSWORD: Optional[str] = Field(default=None, env="MONGO_PASSWORD")
+    MONGO_AUTH_SOURCE: str = Field(default="admin", env="MONGO_AUTH_SOURCE")
     
     # MinIO
     MINIO_ENDPOINT: str = Field(default="localhost:9000", env="MINIO_ENDPOINT")

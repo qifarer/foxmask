@@ -1,10 +1,12 @@
 {
+  "$schema": "https://json.schemastore.org/tsconfig",
   "compilerOptions": {
-    "target": "ES2017",
-    "lib": ["dom", "dom.iterable", "esnext"],
+    "target": "ESNext",
+    "lib": ["dom", "dom.iterable", "esnext", "webworker"],
     "allowJs": true,
     "skipLibCheck": true,
     "strict": true,
+    "forceConsistentCasingInFileNames": true,
     "noEmit": true,
     "esModuleInterop": true,
     "module": "esnext",
@@ -13,15 +15,33 @@
     "isolatedModules": true,
     "jsx": "preserve",
     "incremental": true,
+    "baseUrl": ".",
+    "types": ["vitest/globals", "@serwist/next/typings"],
+    "paths": {
+      "@/libs/model-runtime": ["./packages/model-runtime/src/index.ts"],
+      "@/libs/model-runtime/*": ["./packages/model-runtime/src/*"],
+      "@/database/*": ["./packages/database/src/*", "./src/database/*"],
+      "@/const/*": ["./packages/const/src/*"],
+      "@/utils/*": ["./packages/utils/src/*", "./src/utils/*"],
+      "@/types/*": ["./packages/types/src/*", "./src/types/*"],
+      "@/*": ["./src/*"],
+      "~test-utils": ["./tests/utils.tsx"]
+    },
     "plugins": [
       {
         "name": "next"
       }
-    ],
-    "paths": {
-      "@/*": ["./src/*"]
-    }
+    ]
   },
-  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
-  "exclude": ["node_modules"]
+  "exclude": ["node_modules", "public/sw.js", "tmp", "temp", ".temp"],
+  "include": [
+    "**/*.d.ts",
+    "**/*.ts",
+    "**/*.tsx",
+    ".next/types/**/*.ts",
+    "next-env.d.ts",
+    "src",
+    "tests",
+    "vitest.config.ts"
+  ]
 }
