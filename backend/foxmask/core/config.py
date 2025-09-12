@@ -1,121 +1,115 @@
-# foxmask/core/config.py
+# Configuration file for the Foxmask application
 from pydantic_settings import BaseSettings
-from pydantic import Field, RedisDsn, AnyUrl
-from typing import List, Optional
-from functools import lru_cache
+from pydantic import Field, RedisDsn, MongoDsn, AnyUrl, SecretStr
+from typing import Optional, List
 import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 class Settings(BaseSettings):
-    # Application
-    PROJECT_NAME: str = "Foxmask Document Management System"
-    DEBUG: bool = Field(default=True, env="DEBUG")
-    VERSION: str = "1.0.0"
-    API_V1_STR: str = "/api/v1"
-    GRAPHQL_STR: str = "/graphql"
+    # App
+    APP_NAME: str = Field("Foxmask", env="APP_NAME")
+    APP_VERSION: str = Field("0.1.0", env="APP_VERSION")
+    DEBUG: bool = Field(True, env="DEBUG")
+    ENVIRONMENT: str = Field("development", env="ENVIRONMENT")
     
     # Server
-    HOST: str = Field(default="0.0.0.0", env="HOST")
-    PORT: int = Field(default=8888, env="PORT")
+    HOST: str = Field("0.0.0.0", env="HOST")
+    PORT: int = Field(8888, env="PORT")
     
-    SUPPORTED_FILE_TYPES: list = ["image/", "text/", "application/json"]
-    MAX_FILE_SIZE: int = 100 * 1024 * 1024  # 100MB
-    UPLOAD_DIRECTORY: str = "uploads"
-    CHUNK_SIZE: int = 8 * 1024 * 1024  # 8MB chunks for streaming
-
     # MongoDB
-    MONGO_URI: str = Field(
-        default="mongodb://localhost:27017", 
-        env="MONGO_URI"
-    )
-    MONGO_DB: str = Field(default="foxmask", env="MONGO_DB")
-    MONGO_FILE_COLLECTION: str = Field(
-        default="files", 
-        env="MONGO_FILE_COLLECTION"
-    )
-    MONGO_DOCS_COLLECTION: str = Field(
-        default="documents", 
-        env="MONGO_DOCS_COLLECTION"
-    )
-    MONGO_KB_COLLECTION: str = Field(
-        default="knowledge_bases", 
-        env="MONGO_KB_COLLECTION"
-    )
-    MONGO_USERNAME: Optional[str] = Field(default=None, env="MONGO_USERNAME")
-    MONGO_PASSWORD: Optional[str] = Field(default=None, env="MONGO_PASSWORD")
-    MONGO_AUTH_SOURCE: str = Field(default="admin", env="MONGO_AUTH_SOURCE")
+    MONGODB_URI: MongoDsn = Field("mongodb://localhost:27017", env="MONGODB_URI")
+    MONGODB_DB_NAME: str = Field("foxmask", env="MONGODB_DB_NAME")
+    MONGODB_MAX_POOL_SIZE: int = Field(100, env="MONGODB_MAX_POOL_SIZE")
+    MONGODB_MIN_POOL_SIZE: int = Field(10, env="MONGODB_MIN_POOL_SIZE")
     
     # MinIO
-    MINIO_ENDPOINT: str = Field(default="localhost:9000", env="MINIO_ENDPOINT")
-    MINIO_ACCESS_KEY: str = Field(default="minioadmin", env="MINIO_ACCESS_KEY")
-    MINIO_SECRET_KEY: str = Field(default="minioadmin", env="MINIO_SECRET_KEY")
-    MINIO_SECURE: bool = Field(default=False, env="MINIO_SECURE")
-    MINIO_BUCKET: str = Field(default="documents", env="MINIO_BUCKET")
+    MINIO_ENDPOINT: str = Field("localhost:9000", env="MINIO_ENDPOINT")
+    MINIO_ACCESS_KEY: SecretStr = Field(..., env="MINIO_ACCESS_KEY")
+    MINIO_SECRET_KEY: SecretStr = Field(..., env="MINIO_SECRET_KEY")
+    MINIO_BUCKET_NAME: str = Field("foxmask", env="MINIO_BUCKET_NAME")
+    MINIO_SECURE: bool = Field(False, env="MINIO_SECURE")
+    MINIO_REGION: str = Field("us-east-1", env="MINIO_REGION")
     
     # Kafka
-    KAFKA_BOOTSTRAP_SERVERS: str = Field(
-        default="localhost:9092", 
-        env="KAFKA_BOOTSTRAP_SERVERS"
-    )
-    KAFKA_TOPIC_DOCUMENT_CREATED: str = "document-created"
-    KAFKA_TOPIC_DOCUMENT_PARSED: str = "document-parsed"
-    KAFKA_TOPIC_VECTORIZATION: str = "vectorization"
-    
-    # Redis
-    REDIS_URI: RedisDsn = Field(
-        default="redis://localhost:6379/0", 
-        env="REDIS_URI"
-    )
-    
-    # Casdoor
-    CASDOOR_ENDPOINT: str = Field(
-        default="https://casdoor.example.com", 
-        env="CASDOOR_ENDPOINT"
-    )
-    CASDOOR_CLIENT_ID: str = Field(env="CASDOOR_CLIENT_ID")
-    CASDOOR_CLIENT_SECRET: str = Field(env="CASDOOR_CLIENT_SECRET")
-    CASDOOR_CERT: str = Field(env="CASDOOR_CERT")
-    
-    # CORS
-    CORS_ORIGINS: List[str] = Field(
-        default=["http://localhost:3000", "http://localhost:8000"],
-        env="CORS_ORIGINS"
-    )
-    
-    # Security
-    SECRET_KEY: str = Field(
-        default="change-this-in-production", 
-        env="SECRET_KEY"
-    )
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(
-        default=60 * 24 * 7,  # 7 days
-        env="ACCESS_TOKEN_EXPIRE_MINUTES"
-    )
+    KAFKA_BOOTSTRAP_SERVERS: str = Field("localhost:9092", env="KAFKA_BOOTSTRAP_SERVERS")
+    KAFKA_KNOWLEDGE_TOPIC: str = Field("knowledge_processing", env="KAFKA_KNOWLEDGE_TOPIC")
+    KAFKA_GROUP_ID: str = Field("foxmask-group", env="KAFKA_GROUP_ID")
     
     # Weaviate
-    WEAVIATE_URL: Optional[AnyUrl] = Field(
-        default=None, 
-        env="WEAVIATE_URL"
-    )
+    WEAVIATE_URL: AnyUrl = Field("http://localhost:8080", env="WEAVIATE_URL")
+    WEAVIATE_API_KEY: Optional[SecretStr] = Field(None, env="WEAVIATE_API_KEY")
     
     # Neo4j
-    NEO4J_URI: Optional[AnyUrl] = Field(
-        default=None, 
-        env="NEO4J_URI"
-    )
-    NEO4J_USER: Optional[str] = Field(
-        default=None, 
-        env="NEO4J_USER"
-    )
-    NEO4J_PASSWORD: Optional[str] = Field(
-        default=None, 
-        env="NEO4J_PASSWORD"
-    )
+    NEO4J_URI: AnyUrl = Field("bolt://localhost:7687", env="NEO4J_URI")
+    NEO4J_USER: str = Field("neo4j", env="NEO4J_USER")
+    NEO4J_PASSWORD: SecretStr = Field(..., env="NEO4J_PASSWORD")
+    NEO4J_MAX_CONNECTION_POOL_SIZE: int = Field(50, env="NEO4J_MAX_CONNECTION_POOL_SIZE")
     
+    # Redis (optional for caching/sessions)
+    REDIS_URI: Optional[RedisDsn] = Field(None, env="REDIS_URI")
+    
+    # Casdoor
+    CASDOOR_ENDPOINT: str = Field(..., env="CASDOOR_ENDPOINT")
+    CASDOOR_CLIENT_ID: str = Field(..., env="CASDOOR_CLIENT_ID")
+    CASDOOR_CLIENT_SECRET: str = Field(..., env="CASDOOR_CLIENT_SECRET")
+    CASDOOR_CERT: str = Field(..., env="CASDOOR_CERT")
+    CASDOOR_ORG_NAME: str = Field(..., env="CASDOOR_ORG_NAME")
+    CASDOOR_APP_NAME: str = Field(..., env="CASDOOR_APP_NAME")
+
+    # API Key 配置
+    API_KEY_HEADER: str = Field(default="X-API-Key")
+    API_KEY_APP_NAME: str = Field(default="foxmask-api")
+    API_KEY_DEFAULT_EXPIRE_DAYS: int = Field(default=365)
+    
+    # 权限配置
+    API_KEY_PERMISSIONS: List[str] = Field(default=["read", "write", "delete", "admin"])
+    
+    # 速率限制
+    RATE_LIMIT_PER_MINUTE: int = Field(default=100)
+    RATE_LIMIT_PER_HOUR: int = Field(default=5000)
+    
+    # 安全配置
+    ALLOWED_ORIGINS: List[str] = Field(default=["*"])
+ 
+    # Security
+    SECRET_KEY: SecretStr = Field(..., env="SECRET_KEY")
+    ALGORITHM: str = Field("HS256", env="ALGORITHM")
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(30, env="ACCESS_TOKEN_EXPIRE_MINUTES")
+    REFRESH_TOKEN_EXPIRE_DAYS: int = Field(7, env="REFRESH_TOKEN_EXPIRE_DAYS")
+    
+    # CORS
+    CORS_ORIGINS: list[str] = Field(["http://localhost:3000", "http://127.0.0.1:3000"], env="CORS_ORIGINS")
+    
+    # Rate limiting
+    RATE_LIMIT_PER_MINUTE: int = Field(100, env="RATE_LIMIT_PER_MINUTE")
+    
+    # File upload limits
+    MAX_FILE_SIZE_MB: int = Field(100, env="MAX_FILE_SIZE_MB")
+    ALLOWED_FILE_TYPES: list[str] = Field([
+        "text/plain", "application/pdf", "application/msword",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/vnd.ms-excel", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "text/markdown", "text/csv", "application/json"
+    ], env="ALLOWED_FILE_TYPES")
+
     class Config:
         env_file = ".env"
-        case_sensitive = True
-        extra = "ignore"
+        env_file_encoding = "utf-8"
+        case_sensitive = False
+        extra = "ignore"  # 忽略未定义的環境變數
 
-@lru_cache()
-def get_settings():
-    return Settings()
+    @property
+    def is_production(self) -> bool:
+        return self.ENVIRONMENT == "production"
+    
+    @property
+    def is_development(self) -> bool:
+        return self.ENVIRONMENT == "development"
+    
+    @property
+    def is_testing(self) -> bool:
+        return self.ENVIRONMENT == "testing"
+
+settings = Settings()

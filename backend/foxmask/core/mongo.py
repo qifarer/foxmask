@@ -1,8 +1,9 @@
 from motor.motor_asyncio import AsyncIOMotorClient
-from pymongo.errors import ConnectionFailure
-from foxmask.core.config import get_settings
-
-settings = get_settings()
+from beanie import init_beanie
+import os
+from .config import settings
+from typing import List, Type
+from beanie import Document
 
 class MongoDB:
     client: AsyncIOMotorClient = None
@@ -11,56 +12,39 @@ class MongoDB:
 mongodb = MongoDB()
 
 async def connect_to_mongo():
-    """连接到 MongoDB"""
+    """Connect to MongoDB and initialize Beanie"""
     try:
-        # 构建连接字符串
-        connection_string = settings.MONGO_URI
-        '''
-        if settings.MONGO_USERNAME and settings.MONGO_PASSWORD:
-            # 插入认证信息
-            host_part = connection_string.split("://")[1]
-            connection_string = (
-                f"mongodb://{settings.MONGO_USERNAME}:{settings.MONGO_PASSWORD}@{host_part}"
-                f"?authSource={settings.MONGO_AUTH_SOURCE}"
-            )
-        '''
-        print("Connecting to MongoDB with URI:", connection_string)
-        mongodb.client = AsyncIOMotorClient(connection_string)
+        mongodb.client = AsyncIOMotorClient(str(settings.MONGODB_URI))
+        mongodb.database = mongodb.client[settings.MONGODB_DB_NAME]
         
-        # 测试连接
-        await mongodb.client.admin.command('ping')
+        # Import document models
+        from foxmask.file.models import File
+        from foxmask.knowledge.models.knowledge_item import KnowledgeItem
+        from foxmask.knowledge.models.knowledge_base import KnowledgeBase
+        from foxmask.tag.models import Tag
+        from foxmask.task.models import Task
         
-        # 设置数据库
-        mongodb.database = mongodb.client[settings.MONGO_DB]
+        documents: List[Type[Document]] = [
+            File, 
+            KnowledgeItem, 
+            KnowledgeBase, 
+            Tag, 
+            Task
+        ]
         
-    except ConnectionFailure as e:
+        # Initialize beanie with the document models
+        await init_beanie(
+            database=mongodb.database,
+            document_models=documents,
+        )
+        print(f"Connected to MongoDB: {settings.MONGODB_DB_NAME}")
+        
+    except Exception as e:
+        print(f"Failed to connect to MongoDB: {e}")
         raise
 
 async def close_mongo_connection():
-    """关闭 MongoDB 连接"""
+    """Close MongoDB connection"""
     if mongodb.client:
         mongodb.client.close()
-
-async def get_mongo_db():
-    """获取数据库实例"""
-    if mongodb.database is None:
-        raise RuntimeError("MongoDB is not connected")
-    return mongodb.database
- 
-async def get_file_collection():
-    """获取文件集合"""
-    db = await get_mongo_db()
-    return db[settings.MONGO_FILE_COLLECTION]
-
-async def get_docs_collection():
-    """获取文档集合"""
-    db = await get_mongo_db()
-    return db[settings.MONGO_FILE_COLLECTION]
-
-
-async def get_kb_collection():
-    """获取知识库集合"""
-    db = await get_mongo_db()
-    return db[settings.MONGO_KB_COLLECTION]
-
-
+        print("Disconnected from MongoDB")
