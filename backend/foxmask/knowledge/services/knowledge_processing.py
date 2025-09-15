@@ -7,12 +7,55 @@ from typing import Dict, Any
 from foxmask.core.logger import logger
 from foxmask.core.kafka import kafka_manager
 from foxmask.core.config import settings
+from foxmask.utils.helpers import generate_uuid
 
-from ..models.knowledge_item import KnowledgeItem, KnowledgeItemStatus
+from ..models.knowledge_item import KnowledgeItem, KnowledgeItemStatus,KnowledgeItemType
 from .knowledge_graph import knowledge_graph_service
 from .vector_search import vector_search_service
 
 class KnowledgeProcessingService:
+    async def process_knowledge_item_from_file(self, message: Dict[str, Any]):
+        """Process a knowledge item creation request from a file"""
+        file_id = message.get("file_id")
+        if not file_id:
+            logger.error("Missing file_id in knowledge item creation message")
+            return
+        
+        try:
+            # Create knowledge item from file metadata
+            knowledge_item = KnowledgeItem(
+                title=message.get("title", f"Knowledge Item from File {file_id}"),
+                description=message.get("description", ""),
+                type=KnowledgeItemType.FILE,
+                status=KnowledgeItemStatus.PENDING,
+                source_urls=message.get("source_urls", []),
+                file_ids=[file_id],
+                tags=message.get("tags", []),
+                category=message.get("category", "general"),
+                created_by=message.get("created_by", "system"),
+                created_at=datetime.utcnow(),
+                updated_at=datetime.utcnow()
+            )
+            await knowledge_item.insert()
+            
+            logger.info(f"Knowledge item created from file {file_id}: {knowledge_item.id}")
+            
+            #id =  generate_uuid()
+            # Optionally, trigger further processing (parsing, vectorization, graphing)
+            #processing_message = {
+            #    "knowledge_item_id": id,
+            #    "process_types": ["parse", "vectorize", "graph"]
+            #}
+            #await kafka_manager.send_message(
+            #    topic=settings.KAFKA_KNOWLEDGE_TOPIC,
+            #    value=processing_message,
+            #    key=id
+            #)
+            #logger.info(f"Processing message sent for knowledge item {id}")
+            
+        except Exception as e:
+            logger.error(f"Error creating knowledge item from file {file_id}: {e}")
+    
     async def process_knowledge_item(self, message: Dict[str, Any]):
         """Process a knowledge item with Weaviate and Neo4j integration"""
         knowledge_item_id = message.get("knowledge_item_id")

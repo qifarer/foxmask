@@ -6,7 +6,7 @@ from typing import Dict, Any, List, Optional
 from datetime import datetime
 import uuid
 from foxmask.core.kafka import kafka_manager, KafkaMessage
-from foxmask.core.schemas import (
+from .schemas import (
     KnowledgeProcessingMessage, FileProcessingMessage,
     NotificationMessage, SystemEventMessage, DataSyncMessage,
     MessageType, MessagePriority
@@ -23,6 +23,50 @@ class TaskProducer:
             MessageType.SYSTEM_EVENT: SystemEventMessage,
             MessageType.DATA_SYNC: DataSyncMessage
         }
+    
+    async def produce_file_processing_task(
+        self,
+        file_id: str,
+        processing_type: str,
+        options: Optional[Dict[str, Any]] = None,
+        priority: MessagePriority = MessagePriority.NORMAL,
+        correlation_id: Optional[str] = None
+    ) -> str:
+        """Produce file processing task message with enhanced options"""
+        try:
+            # Validate processing type
+            valid_processing_types = ["create_item", "transcode", "metadata_extraction"]
+            if processing_type not in valid_processing_types:
+                raise ValueError(f"Invalid processing type: {processing_type}")
+            
+            message = FileProcessingMessage(
+                message_id=str(uuid.uuid4()),   
+                type=MessageType.FILE_PROCESSING,
+                priority=priority,
+                source=settings.APP_NAME,
+                correlation_id=correlation_id,
+                metadata={},
+                file_id=file_id,
+                processing_type=processing_type,
+                options=options or {}
+            )
+            
+            message_id = await kafka_manager.send_message(
+                topic="file_processing",
+                value=message.model_dump(),
+                key=file_id  # Partition by file ID
+            )
+            
+            logger.info(
+                f"File processing task produced for file: {file_id}, "
+                f"type: {processing_type}, message ID: {message_id}"
+            )
+            
+            return message_id
+            
+        except Exception as e:
+            logger.error(f"Failed to produce file processing task: {e}")
+            raise
 
     async def produce_knowledge_processing_task(
         self,
@@ -62,49 +106,7 @@ class TaskProducer:
             logger.error(f"Failed to produce knowledge processing task: {e}")
             raise
 
-    async def produce_file_processing_task(
-        self,
-        file_id: str,
-        processing_type: str,
-        options: Optional[Dict[str, Any]] = None,
-        priority: MessagePriority = MessagePriority.NORMAL,
-        correlation_id: Optional[str] = None
-    ) -> str:
-        """Produce file processing task message with enhanced options"""
-        try:
-            # Validate processing type
-            valid_processing_types = ["thumbnail", "extract_text", "validate", "virus_scan"]
-            if processing_type not in valid_processing_types:
-                raise ValueError(f"Invalid processing type: {processing_type}")
-            
-            message = FileProcessingMessage(
-                message_id=str(uuid.uuid4()),
-                type=MessageType.FILE_PROCESSING,
-                priority=priority,
-                source=settings.APP_NAME,
-                correlation_id=correlation_id,
-                metadata={},
-                file_id=file_id,
-                processing_type=processing_type,
-                options=options or {}
-            )
-            
-            message_id = await kafka_manager.send_message(
-                topic="file_processing",
-                value=message.model_dump(),
-                key=file_id  # Partition by file ID
-            )
-            
-            logger.info(
-                f"File processing task produced for file: {file_id}, "
-                f"type: {processing_type}, message ID: {message_id}"
-            )
-            
-            return message_id
-            
-        except Exception as e:
-            logger.error(f"Failed to produce file processing task: {e}")
-            raise
+    
 
     async def produce_notification(
         self,

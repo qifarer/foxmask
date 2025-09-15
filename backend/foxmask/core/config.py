@@ -24,6 +24,18 @@ class Settings(BaseSettings):
     MONGODB_MAX_POOL_SIZE: int = Field(100, env="MONGODB_MAX_POOL_SIZE")
     MONGODB_MIN_POOL_SIZE: int = Field(10, env="MONGODB_MIN_POOL_SIZE")
     
+    DEFAULT_TENANT_ID: str =  Field("foxmask", env="DEFAULT_TENANT_ID") 
+    DEFAULT_TENANT_NAME: str =  Field("Foxmask", env="DEFAULT_TENANT_NAME")
+    
+    # MinIO 配置
+    MINIO_USE_TENANT_BUCKETS: bool = Field(True, env="MINIO_USE_TENANT_BUCKETS")
+    # = True  # 是否为每个租户创建独立存储桶
+    MINIO_DEFAULT_BUCKET: str = Field("foxmask", env="MINIO_DEFAULT_BUCKET") 
+    MINIO_BUCKET_PREFIX: str = Field("tt", env="MINIO_BUCKET_PREFIX") 
+    
+    # 文件存储路径配置
+    FILE_STORAGE_PATH_FORMAT: str = "{tenant_id}/{year}{month}{day}/{filename}"
+    
     # MinIO
     MINIO_ENDPOINT: str = Field("localhost:9000", env="MINIO_ENDPOINT")
     MINIO_ACCESS_KEY: SecretStr = Field(..., env="MINIO_ACCESS_KEY")
@@ -34,8 +46,8 @@ class Settings(BaseSettings):
     
     # Kafka
     KAFKA_BOOTSTRAP_SERVERS: str = Field("localhost:9092", env="KAFKA_BOOTSTRAP_SERVERS")
-    KAFKA_KNOWLEDGE_TOPIC: str = Field("knowledge_processing", env="KAFKA_KNOWLEDGE_TOPIC")
     KAFKA_GROUP_ID: str = Field("foxmask-group", env="KAFKA_GROUP_ID")
+    KAFKA_KNOWLEDGE_TOPIC: str = Field("KAFKA_KNOWLEDGE_TOPIC", env="KAFKA_KNOWLEDGE_TOPIC")
     
     # Weaviate
     WEAVIATE_URL: AnyUrl = Field("http://localhost:8080", env="WEAVIATE_URL")

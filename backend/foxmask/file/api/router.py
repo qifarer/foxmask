@@ -1,20 +1,19 @@
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, BackgroundTasks, Query
-from typing import List, Optional, Dict, Any
-import json
-from bson import ObjectId
-from datetime import datetime
+# -*- coding: utf-8 -*-
+# foxmask/file/router.py
+# Copyright (C) 2025 FoxMask Inc.
+# author: Roky
 
-from .services import file_service
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Query
+from typing import  Optional, Dict
+from ..services import file_service
 from .schemas import (
     FileUploadInitRequest, FileUploadInitResponse, ChunkUploadRequest, ChunkUploadResponse,
-    FileCompleteUploadRequest, UploadProgressResponse, ResumeUploadResponse, FileResponse,
-    FileListResponse, FileUpdateRequest, FileProcessingJobResponse, ErrorResponse, SuccessResponse,
-    FileStatus, FileVisibility
+    FileCompleteUploadRequest, ResumeUploadResponse, FileResponse,
+    FileListResponse, FileUpdateRequest, FileStatus, FileVisibility
 )
-from foxmask.shared.dependencies import get_user_from_token,get_chunk_upload_request
-from foxmask.core.logger import logger
-from foxmask.core.config import settings
+from foxmask.shared.dependencies import get_user_from_token, get_chunk_upload_request
 from foxmask.utils.helpers import convert_objectids_to_strings
+from foxmask.core.logger import logger
 
 router = APIRouter(prefix="/files", tags=["files"])
 
@@ -22,17 +21,17 @@ router = APIRouter(prefix="/files", tags=["files"])
 async def init_file_upload(
     upload_request: FileUploadInitRequest,
     context: Dict = Depends(get_user_from_token)
-):
-    logger.warning("init_file_upload Call: start", extra={"request_id": "auto-generated"})
+    ):
     """Initialize multipart file upload (requires write permission)"""
+    logger.info("init_file_upload: Starting file upload initialization")
+    
     try:
         result = await file_service.init_multipart_upload(
             upload_request, 
             context["user_id"],
             context.get("tenant_id", "default")
         )
-        
-        # 确保返回的是Pydantic模型实例，而不是字典
+        # Ensure response is Pydantic model instance
         if isinstance(result, dict):
             return FileUploadInitResponse(**result)
         return result
@@ -44,19 +43,19 @@ async def init_file_upload(
             detail=f"Failed to initialize upload: {str(e)}"
         )
     
-
 @router.post("/upload/chunk", response_model=ChunkUploadResponse)
 async def upload_file_chunk(
     upload_request: ChunkUploadRequest = Depends(get_chunk_upload_request),
     file: UploadFile = File(...),
     context: Dict = Depends(get_user_from_token)
 ):
-    print("upload_file_chunk Call: start")
-    
+
     """Upload a file chunk (requires write permission)"""
-    # 验证文件所有权
-    file_metadata = await file_service.get_file_metadata(upload_request.file_id)
-    if not file_metadata or file_metadata.uploaded_by != context["user_id"]:
+    logger.info(f"upload_file_chunk: Uploading chunk {upload_request.chunk_number} for file {upload_request.file_id}")
+    
+    # Verify file ownership
+    file = await file_service.get_file(upload_request.file_id)
+    if not file or file.uploaded_by != context["user_id"]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized to upload to this file"
@@ -64,15 +63,14 @@ async def upload_file_chunk(
     
     # Read chunk data
     chunk_data = await file.read()
-    print(f"upload_request:, {upload_request.model_dump}")
-    # 验证块大小是否匹配
+    
+    # Validate chunk size
     if len(chunk_data) != upload_request.chunk_size:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Chunk size mismatch: expected {upload_request.chunk_size}, got {len(chunk_data)}"
         )
-    
-    print(f"chunk_data:, {chunk_data}")
+
     try:
         result = await file_service.upload_chunk(
             file_id=upload_request.file_id,
@@ -84,7 +82,7 @@ async def upload_file_chunk(
             checksum_sha256=upload_request.checksum_sha256
         )
         
-        # 确保返回的是Pydantic模型实例
+        # Ensure response is Pydantic model instance
         if isinstance(result, dict):
             return ChunkUploadResponse(**result)
         return result
@@ -95,41 +93,38 @@ async def upload_file_chunk(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to upload chunk: {str(e)}"
         )
-    
 
-        
 @router.post("/upload/complete", response_model=FileResponse)
 async def complete_file_upload(
     complete_request: FileCompleteUploadRequest,
     context: Dict = Depends(get_user_from_token)
 ):
     """Complete multipart file upload (requires write permission)"""
-    # 验证文件所有权
-    file_metadata = await file_service.get_file_metadata(complete_request.file_id)
-    if not file_metadata or file_metadata.uploaded_by != context["user_id"]:
+    logger.info(f"complete_file_upload: Completing upload for file {complete_request.file_id}")
+    
+    # Verify file ownership
+    file = await file_service.get_file(complete_request.file_id)
+    if not file or file.uploaded_by != context["user_id"]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized to complete this upload"
         )
     
     try:
-        file_metadata = await file_service.complete_multipart_upload(
+        file = await file_service.complete_multipart_upload(
             file_id=complete_request.file_id,
             upload_id=complete_request.upload_id,
             chunk_etags=complete_request.chunk_etags,
             checksum_md5=complete_request.checksum_md5,
             checksum_sha256=complete_request.checksum_sha256
         )
-        #response_data = file_metadata.to_response_dict()
-        #return FileResponse(**response_data)
-        # 确保返回的是Pydantic模型实例
-        if isinstance(file_metadata, dict):
-            # 转换字典中的 ObjectId 为字符串
-            file_metadata = convert_objectids_to_strings(file_metadata)
-            return FileResponse(**file_metadata)
+        
+        # Convert ObjectId to string and ensure Pydantic model response
+        if isinstance(file, dict):
+            file = convert_objectids_to_strings(file)
+            return FileResponse(**file)
         else:
-            # 如果是对象，转换为字典并处理 ObjectId
-            file_dict = file_metadata.dict() if hasattr(file_metadata, 'dict') else file_metadata
+            file_dict = file.dict() if hasattr(file, 'dict') else file
             file_dict = convert_objectids_to_strings(file_dict)
             return FileResponse(**file_dict)
         
@@ -140,54 +135,26 @@ async def complete_file_upload(
             detail=f"Failed to complete upload: {str(e)}"
         )
 
-@router.get("/{file_id}/upload/progress", response_model=UploadProgressResponse)
-async def get_upload_progress(
-    file_id: str,
-    context: Dict = Depends(get_user_from_token)
-):
-    """Get upload progress for a file (requires read permission)"""
-    file_metadata = await file_service.get_file_metadata(file_id)
-    if not file_metadata:
-        raise HTTPException(status_code=404, detail="File not found")
-    
-    # Verify ownership
-    if (file_metadata.uploaded_by != context["user_id"] and 
-        "admin" not in context["permissions"]):
-        raise HTTPException(status_code=403, detail="Not authorized to access this file")
-    
-    try:
-        progress = await file_service.get_upload_progress(file_id)
-        
-        # 确保返回的是Pydantic模型实例
-        if isinstance(progress, dict):
-            return UploadProgressResponse(**progress)
-        return progress
-        
-    except Exception as e:
-        logger.error(f"Failed to get upload progress: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get upload progress: {str(e)}"
-        )
-
 @router.post("/{file_id}/upload/resume", response_model=ResumeUploadResponse)
 async def resume_file_upload(
     file_id: str,
     context: Dict = Depends(get_user_from_token)
 ):
     """Resume a multipart file upload (requires write permission)"""
-    file_metadata = await file_service.get_file_metadata(file_id)
-    if not file_metadata:
+    logger.info(f"resume_file_upload: Resuming upload for file {file_id}")
+    
+    file = await file_service.get_file(file_id)
+    if not file:
         raise HTTPException(status_code=404, detail="File not found")
     
     # Verify ownership
-    if file_metadata.uploaded_by != context["user_id"]:
+    if file.uploaded_by != context["user_id"]:
         raise HTTPException(status_code=403, detail="Not authorized to access this file")
     
     try:
         result = await file_service.resume_multipart_upload(file_id)
         
-        # 确保返回的是Pydantic模型实例
+        # Ensure response is Pydantic model instance
         if isinstance(result, dict):
             return ResumeUploadResponse(**result)
         return result
@@ -199,18 +166,21 @@ async def resume_file_upload(
             detail=f"Failed to resume upload: {str(e)}"
         )
 
+
 @router.delete("/{file_id}/upload/abort")
 async def abort_file_upload(
     file_id: str,
     context: Dict = Depends(get_user_from_token)
 ):
     """Abort a multipart file upload (requires write permission)"""
-    file_metadata = await file_service.get_file_metadata(file_id)
-    if not file_metadata:
+    logger.info(f"abort_file_upload: Aborting upload for file {file_id}")
+    
+    file = await file_service.get_file(file_id)
+    if not file:
         raise HTTPException(status_code=404, detail="File not found")
     
     # Verify ownership
-    if file_metadata.uploaded_by != context["user_id"]:
+    if file.uploaded_by != context["user_id"]:
         raise HTTPException(status_code=403, detail="Not authorized to access this file")
     
     try:
@@ -226,32 +196,36 @@ async def abort_file_upload(
             detail=f"Failed to abort upload: {str(e)}"
         )
 
+
 @router.get("/{file_id}", response_model=FileResponse)
-async def get_file_metadata(
+async def get_file(
     file_id: str,
     context: Dict = Depends(get_user_from_token)
 ):
     """Get file metadata (requires read permission)"""
-    file_metadata = await file_service.get_file_metadata(file_id)
-    if not file_metadata:
+    logger.info(f"get_file: Fetching metadata for file {file_id}")
+    
+    file = await file_service.get_file(file_id)
+    if not file:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="File not found"
         )
     
-    # Check permission - 文件所有者或具有admin权限的API Key可以访问
-    if (file_metadata.uploaded_by != context["user_id"] and 
+    # Check permission - file owner or admin can access
+    if (file.uploaded_by != context["user_id"] and 
         "admin" not in context["permissions"] and
-        file_metadata.visibility != FileVisibility.PUBLIC):
+        file.visibility != FileVisibility.PUBLIC):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized to access this file"
         )
     
-    # 确保返回的是Pydantic模型实例
-    if isinstance(file_metadata, dict):
-        return FileResponse(**file_metadata)
-    return file_metadata
+    # Ensure response is Pydantic model instance
+    if isinstance(file, dict):
+        return FileResponse(**file)
+    return file
+
 
 @router.get("/{file_id}/download")
 async def download_file(
@@ -259,17 +233,19 @@ async def download_file(
     context: Dict = Depends(get_user_from_token)
 ):
     """Get download URL for a file (requires read permission)"""
-    file_metadata = await file_service.get_file_metadata(file_id)
-    if not file_metadata:
+    logger.info(f"download_file: Generating download URL for file {file_id}")
+    
+    file = await file_service.get_file(file_id)
+    if not file:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="File not found"
         )
     
     # Check permission
-    if (file_metadata.uploaded_by != context["user_id"] and 
+    if (file.uploaded_by != context["user_id"] and 
         "admin" not in context["permissions"] and
-        file_metadata.visibility != FileVisibility.PUBLIC):
+        file.visibility != FileVisibility.PUBLIC):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized to access this file"
@@ -298,15 +274,17 @@ async def delete_file(
     context: Dict = Depends(get_user_from_token)
 ):
     """Delete a file (requires delete permission)"""
-    file_metadata = await file_service.get_file_metadata(file_id)
-    if not file_metadata:
+    logger.info(f"delete_file: Deleting file {file_id}")
+    
+    file = await file_service.get_file(file_id)
+    if not file:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="File not found"
         )
     
-    # Check permission - 只有文件所有者或具有admin权限的API Key可以删除
-    if (file_metadata.uploaded_by != context["user_id"] and 
+    # Check permission - only file owner or admin can delete
+    if (file.uploaded_by != context["user_id"] and 
         "admin" not in context["permissions"]):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -329,21 +307,23 @@ async def delete_file(
             detail=f"Failed to delete file: {str(e)}"
         )
 
+
 @router.get("/", response_model=FileListResponse)
 async def list_files(
     context: Dict = Depends(get_user_from_token),
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(10, ge=1, le=100, description="Number of items per page"),
     user_id: Optional[str] = Query(None, description="Filter by user ID (admin only)"),
-    status: Optional[FileStatus] = Query(None, description="Filter by file status"),
+    file_status: Optional[FileStatus] = Query(None, description="Filter by file status"),
     visibility: Optional[FileVisibility] = Query(None, description="Filter by visibility")
 ):
     """List files (requires read permission)"""
-    # 如果是admin权限，可以查看所有文件或指定用户的文件
+    logger.info(f"list_files: Listing files for user {context['user_id']} with filters - page: {page}, page_size: {page_size}, user_id: {user_id}, status: {status}, visibility: {visibility}")
+    # Admin can view all files or specific user's files
     if "admin" in context["permissions"] and user_id:
         target_user_id = user_id
     else:
-        # 普通用户只能查看自己的文件
+        # Regular users can only view their own files
         target_user_id = context["user_id"]
     
     try:
@@ -351,7 +331,7 @@ async def list_files(
             user_id=target_user_id,
             page=page,
             page_size=page_size,
-            status=status,
+            status=file_status,
             visibility=visibility
         )
         
@@ -369,28 +349,31 @@ async def list_files(
             detail=f"Failed to list files: {str(e)}"
         )
 
+
 @router.put("/{file_id}", response_model=FileResponse)
-async def update_file_metadata(
+async def update_file(
     file_id: str,
     update_request: FileUpdateRequest,
     context: Dict = Depends(get_user_from_token)
 ):
     """Update file metadata (requires write permission)"""
-    file_metadata = await file_service.get_file_metadata(file_id)
-    if not file_metadata:
+    logger.info(f"update_file: Updating metadata for file {file_id}")
+    
+    file = await file_service.get_file(file_id)
+    if not file:
         raise HTTPException(status_code=404, detail="File not found")
     
     # Verify ownership
-    if (file_metadata.uploaded_by != context["user_id"] and 
+    if (file.uploaded_by != context["user_id"] and 
         "admin" not in context["permissions"]):
         raise HTTPException(status_code=403, detail="Not authorized to update this file")
     
     try:
-        updated_metadata = await file_service.update_file_metadata(
+        updated_metadata = await file_service.update_file(
             file_id, update_request
         )
         
-        # 确保返回的是Pydantic模型实例
+        # Ensure response is Pydantic model instance
         if isinstance(updated_metadata, dict):
             return FileResponse(**updated_metadata)
         return updated_metadata
@@ -402,15 +385,18 @@ async def update_file_metadata(
             detail=f"Failed to update file metadata: {str(e)}"
         )
 
+
 @router.get("/stats/summary")
 async def get_files_stats(
     context: Dict = Depends(get_user_from_token),
     user_id: Optional[str] = Query(None, description="User ID to get stats for (admin only)")
 ):
     """Get files statistics (requires read permission)"""
+    logger.info(f"get_files_stats: Getting file stats for user {context['user_id']} with target user {user_id}")
+    
     target_user_id = context["user_id"]
     
-    # 如果是admin，可以查看其他用户的统计信息
+    # Admin can view other users' statistics
     if "admin" in context["permissions"] and user_id:
         target_user_id = user_id
     
@@ -422,77 +408,4 @@ async def get_files_stats(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to get file stats: {str(e)}"
-        )
-
-@router.post("/{file_id}/process")
-async def process_file(
-    file_id: str,
-    job_type: str = Form(...),
-    parameters: str = Form(...),
-    priority: int = Form(1),
-    context: Dict = Depends(get_user_from_token)
-):
-    """Start file processing job (requires write permission)"""
-    file_metadata = await file_service.get_file_metadata(file_id)
-    if not file_metadata:
-        raise HTTPException(status_code=404, detail="File not found")
-    
-    # Verify ownership
-    if (file_metadata.uploaded_by != context["user_id"] and 
-        "admin" not in context["permissions"]):
-        raise HTTPException(status_code=403, detail="Not authorized to process this file")
-    
-    try:
-        # 解析JSON参数
-        params_dict = json.loads(parameters)
-        
-        job = await file_service.start_processing_job(
-            file_id=file_id,
-            job_type=job_type,
-            parameters=params_dict,
-            priority=priority,
-            user_id=context["user_id"]
-        )
-        
-        # 确保返回的是Pydantic模型实例
-        if isinstance(job, dict):
-            return FileProcessingJobResponse(**job)
-        return job
-        
-    except json.JSONDecodeError:
-        raise HTTPException(status_code=400, detail="Invalid JSON parameters")
-    except Exception as e:
-        logger.error(f"Failed to start processing job: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to start processing job: {str(e)}"
-        )
-
-@router.get("/jobs/{job_id}", response_model=FileProcessingJobResponse)
-async def get_processing_job(
-    job_id: str,
-    context: Dict = Depends(get_user_from_token)
-):
-    """Get processing job status (requires read permission)"""
-    try:
-        job = await file_service.get_processing_job(job_id)
-        if not job:
-            raise HTTPException(status_code=404, detail="Job not found")
-        
-        # Verify ownership
-        file_metadata = await file_service.get_file_metadata(job.file_id)
-        if (file_metadata.uploaded_by != context["user_id"] and 
-            "admin" not in context["permissions"]):
-            raise HTTPException(status_code=403, detail="Not authorized to access this job")
-        
-        # 确保返回的是Pydantic模型实例
-        if isinstance(job, dict):
-            return FileProcessingJobResponse(**job)
-        return job
-        
-    except Exception as e:
-        logger.error(f"Failed to get processing job: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get processing job: {str(e)}"
         )

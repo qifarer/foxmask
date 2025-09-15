@@ -1,16 +1,27 @@
 from aiokafka import AIOKafkaProducer, AIOKafkaConsumer
 from aiokafka.errors import KafkaError, KafkaTimeoutError
-from kafka.admin import KafkaAdminClient, NewTopic  # 仍然使用同步客户端进行管理操作
+from kafka.admin import KafkaAdminClient, NewTopic
+from kafka.errors import TopicAlreadyExistsError
 import json
 import asyncio
+from datetime import datetime, date
+from decimal import Decimal
 from typing import Dict, Any, Optional, Callable, List, AsyncGenerator
 import uuid
-from datetime import datetime
 from functools import wraps
-import logging
 
 from .config import settings
 from .logger import logger
+
+def custom_json_serializer(obj):
+    """自定义 JSON 序列化器，处理 datetime 和其他非标准类型"""
+    if isinstance(obj, (datetime, date)):
+        return obj.isoformat()
+    elif isinstance(obj, Decimal):
+        return float(obj)
+    elif hasattr(obj, '__dict__'):
+        return obj.__dict__
+    raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
 
 def retry_kafka_operation(max_retries: int = 3, delay: float = 1.0):
     """Decorator for retrying Kafka operations"""
@@ -73,16 +84,22 @@ class KafkaMessage:
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'KafkaMessage':
         """Create message from dictionary"""
+        timestamp = data.get('timestamp')
+        if timestamp and isinstance(timestamp, str):
+            timestamp = datetime.fromisoformat(timestamp)
+        
         return cls(
             topic=data['topic'],
             value=data['value'],
             key=data.get('key'),
             message_id=data.get('message_id'),
-            timestamp=datetime.fromisoformat(data['timestamp']),
+            timestamp=timestamp,
             headers=data.get('headers', {})
         )
 
-class AIOKafkaManager:
+class KafkaService:
+    """Kafka服务，提供Topic创建、消息生产和消费功能"""
+    
     def __init__(self):
         self.producer: Optional[AIOKafkaProducer] = None
         self.admin_client: Optional[KafkaAdminClient] = None
@@ -92,75 +109,128 @@ class AIOKafkaManager:
 
     @retry_kafka_operation(max_retries=3, delay=1.0)
     async def create_producer(self):
-        """Create AIOKafka producer with retry mechanism"""
+        """创建Kafka生产者"""
         try:
+            if self.producer and not self.producer._closed:
+                return
+                
             self.producer = AIOKafkaProducer(
                 bootstrap_servers=settings.KAFKA_BOOTSTRAP_SERVERS.split(','),
-                value_serializer=lambda v: json.dumps(v).encode('utf-8'),
+                value_serializer=lambda v: json.dumps(v, default=custom_json_serializer).encode('utf-8'),
                 key_serializer=lambda k: k.encode('utf-8') if k else None,
                 acks='all',
                 compression_type='gzip',
                 request_timeout_ms=30000,
-                max_batch_size=16384,  # 16KB
-                linger_ms=5,  # 5ms linger for batching
+                max_batch_size=16384,
+                linger_ms=5,
                 retry_backoff_ms=100,
                 security_protocol='PLAINTEXT'
             )
             await self.producer.start()
-            logger.info("AIOKafka producer created successfully")
+            logger.info("Kafka producer created successfully")
         except Exception as e:
-            logger.error(f"Failed to create AIOKafka producer: {e}")
-            raise
+            logger.error(f"Failed to create Kafka producer: {e}")
+            raise    
 
-    async def create_topic(self, topic_name: str, num_partitions: int = 3, replication_factor: int = 1):
-        """Create Kafka topic if it doesn't exist (using sync admin client)"""
+    async def create_topic(
+        self, 
+        topic_name: str, 
+        num_partitions: int = 3, 
+        replication_factor: int = 1,
+        config: Optional[Dict[str, str]] = None
+    ):
+        """创建Kafka Topic"""
         if topic_name in self.topics_created:
             return
             
         try:
-            self.admin_client = KafkaAdminClient(
-                bootstrap_servers=settings.KAFKA_BOOTSTRAP_SERVERS.split(','),
-                client_id='foxmask-admin'
-            )
+            if not self.admin_client:
+                self.admin_client = KafkaAdminClient(
+                    bootstrap_servers=settings.KAFKA_BOOTSTRAP_SERVERS.split(','),
+                    client_id=f'{settings.APP_NAME}-admin'
+                )
             
+            # 检查Topic是否已存在
+            existing_topics = self.admin_client.list_topics()
+            if topic_name in existing_topics:
+                self.topics_created.add(topic_name)
+                logger.info(f"Kafka topic '{topic_name}' already exists")
+                return
+            
+            # 创建Topic配置
+            topic_config = config or {
+                'retention.ms': '604800000',  # 7 days
+                'cleanup.policy': 'delete'
+            }
+            
+            # 创建Topic
             topic_list = [NewTopic(
                 name=topic_name,
                 num_partitions=num_partitions,
                 replication_factor=replication_factor,
-                topic_configs={
-                    'retention.ms': '604800000',  # 7 days
-                    'cleanup.policy': 'delete'
-                }
+                topic_configs=topic_config
             )]
             
             self.admin_client.create_topics(new_topics=topic_list, validate_only=False)
             self.topics_created.add(topic_name)
             logger.info(f"Kafka topic '{topic_name}' created successfully")
+            
+        except TopicAlreadyExistsError:
+            self.topics_created.add(topic_name)
+            logger.info(f"Kafka topic '{topic_name}' already exists")
         except Exception as e:
-            if "TopicAlreadyExistsError" in str(e) or "already exists" in str(e):
-                logger.info(f"Kafka topic '{topic_name}' already exists")
+            if "already exists" in str(e).lower():
                 self.topics_created.add(topic_name)
+                logger.info(f"Kafka topic '{topic_name}' already exists")
             else:
                 logger.error(f"Failed to create Kafka topic '{topic_name}': {e}")
                 raise
 
+    async def ensure_topic_exists(self, topic_name: str) -> bool:
+        """确保Topic存在"""
+        try:
+            if topic_name in self.topics_created:
+                return True
+                
+            if not self.admin_client:
+                self.admin_client = KafkaAdminClient(
+                    bootstrap_servers=settings.KAFKA_BOOTSTRAP_SERVERS.split(','),
+                    client_id=f'{settings.APP_NAME}-admin'
+                )
+            
+            # 检查Topic是否已存在
+            existing_topics = self.admin_client.list_topics()
+            if topic_name in existing_topics:
+                self.topics_created.add(topic_name)
+                return True
+            
+            # 如果Topic不存在，则创建
+            await self.create_topic(topic_name)
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error ensuring topic '{topic_name}' exists: {e}")
+            return False
+
+
     @retry_kafka_operation(max_retries=3, delay=1.0)
     async def send_message(self, topic: str, value: Dict[str, Any], key: Optional[str] = None) -> str:
-        """Send message to Kafka topic with retry mechanism"""
+        """发送消息到Kafka Topic"""
         if not self.producer:
             await self.create_producer()
         
-        # Ensure topic exists
-        await self.create_topic(topic)
+        # 确保Topic存在
+        await self.ensure_topic_exists(topic)
         
-        # Create message with metadata
+        # 创建消息
         message = KafkaMessage(topic, value, key)
         
+        
         try:
-            # Convert headers to list of tuples
-            kafka_headers = [(k, v.encode()) for k, v in message.headers.items()]
+            # 转换headers为Kafka格式
+            kafka_headers = [(k, str(v).encode('utf-8')) for k, v in message.headers.items()]
             
-            # Send message asynchronously
+            # 发送消息
             await self.producer.send_and_wait(
                 topic=topic,
                 value=message.to_dict(),
@@ -168,10 +238,7 @@ class AIOKafkaManager:
                 headers=kafka_headers
             )
             
-            logger.info(
-                f"Message {message.message_id} sent to topic '{topic}'"
-            )
-            
+            logger.info(f"Message {message.message_id} sent to topic '{topic}'")
             return message.message_id
             
         except KafkaTimeoutError as e:
@@ -182,7 +249,7 @@ class AIOKafkaManager:
             raise
 
     async def send_messages_batch(self, messages: List[Dict[str, Any]]) -> List[str]:
-        """Send batch of messages efficiently"""
+        """批量发送消息"""
         if not self.producer:
             await self.create_producer()
         
@@ -210,8 +277,11 @@ class AIOKafkaManager:
         enable_auto_commit: bool = True,
         auto_commit_interval_ms: int = 5000
     ) -> AIOKafkaConsumer:
-        """Create AIOKafka consumer"""
+        """创建Kafka消费者"""
         try:
+            # 确保Topic存在
+            await self.ensure_topic_exists(topic)
+            
             consumer = AIOKafkaConsumer(
                 topic,
                 bootstrap_servers=settings.KAFKA_BOOTSTRAP_SERVERS.split(','),
@@ -219,7 +289,7 @@ class AIOKafkaManager:
                 auto_offset_reset=auto_offset_reset,
                 enable_auto_commit=enable_auto_commit,
                 auto_commit_interval_ms=auto_commit_interval_ms,
-                value_deserializer=lambda x: json.loads(x.decode('utf-8')),
+                value_deserializer=lambda x: json.loads(x.decode('utf-8')) if x else None,
                 key_deserializer=lambda x: x.decode('utf-8') if x else None,
                 max_poll_records=100,
                 max_poll_interval_ms=300000,
@@ -229,43 +299,73 @@ class AIOKafkaManager:
             
             await consumer.start()
             self.consumers[group_id] = consumer
-            logger.info(f"AIOKafka consumer created for topic '{topic}' with group ID '{group_id}'")
+            logger.info(f"Kafka consumer created for topic '{topic}' with group ID '{group_id}'")
             return consumer
             
         except Exception as e:
-            logger.error(f"Failed to create AIOKafka consumer: {e}")
+            logger.error(f"Failed to create Kafka consumer: {e}")
             raise
+
+    async def subscribe_to_topic(self, topic: str, group_id: str) -> bool:
+        """订阅Kafka Topic"""
+        try:
+            if group_id in self.consumers:
+                logger.info(f"Already subscribed to topic '{topic}' with group ID '{group_id}'")
+                return True
+                
+            await self.create_consumer(topic, group_id)
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to subscribe to topic '{topic}': {e}")
+            return False
 
     async def consume_messages(
         self,
         topic: str,
         group_id: str,
-        processor: Callable[[Dict[str, Any]], Any],
-        batch_size: int = 100,
-        timeout_ms: int = 1000
+        processor: Optional[Callable[[Dict[str, Any]], Any]] = None
     ) -> AsyncGenerator[Dict[str, Any], None]:
-        """Consume messages from Kafka topic and yield them for processing"""
-        consumer = await self.create_consumer(topic, group_id)
+        """消费消息"""
+        # 确保已订阅Topic
+        if not await self.subscribe_to_topic(topic, group_id):
+            raise Exception(f"Failed to subscribe to topic '{topic}'")
+        
+        consumer = self.consumers[group_id]
         
         try:
+            self.running = True
             while self.running:
                 try:
-                    # Get messages asynchronously
                     async for message in consumer:
                         if not self.running:
                             break
                             
                         try:
-                            yield message
-                            # Auto-commit is handled by the consumer
-                            
+                            # 解析消息
+                            message_value = message.value
+                            if isinstance(message_value, dict) and 'value' in message_value:
+                                # 提取实际的消息内容
+                                yield message_value['value']
+                                
+                                # 如果有处理器，则调用处理器
+                                if processor:
+                                    await processor(message_value['value'])
+                            else:
+                                # 直接返回消息值
+                                yield message_value
+                                
+                                # 如果有处理器，则调用处理器
+                                if processor:
+                                    await processor(message_value)
+                                
                         except Exception as e:
-                            logger.error(f"Error processing message {message.value.get('message_id')}: {e}")
+                            logger.error(f"Error processing message: {e}")
                             continue
                             
                 except Exception as e:
                     logger.error(f"Error in consumer for group {group_id}: {e}")
-                    await asyncio.sleep(1)  # Wait before retrying
+                    await asyncio.sleep(1)  # 等待后重试
                     
         finally:
             await consumer.stop()
@@ -273,7 +373,7 @@ class AIOKafkaManager:
                 del self.consumers[group_id]
 
     async def get_consumer_position(self, group_id: str, topic: str) -> Optional[Dict[str, Any]]:
-        """Get consumer position information"""
+        """获取消费者位置信息"""
         if group_id not in self.consumers:
             return None
         
@@ -293,29 +393,74 @@ class AIOKafkaManager:
             logger.error(f"Error getting consumer position for group {group_id}: {e}")
             return None
 
+    async def list_topics(self) -> List[str]:
+        """列出所有Topic"""
+        try:
+            if not self.admin_client:
+                self.admin_client = KafkaAdminClient(
+                    bootstrap_servers=settings.KAFKA_BOOTSTRAP_SERVERS.split(','),
+                    client_id=f'{settings.APP_NAME}-admin'
+                )
+            
+            return list(self.admin_client.list_topics())
+        except Exception as e:
+            logger.error(f"Failed to list topics: {e}")
+            return []
+
+    async def get_topic_info(self, topic: str) -> Optional[Dict[str, Any]]:
+        """获取Topic信息"""
+        try:
+            if not self.admin_client:
+                self.admin_client = KafkaAdminClient(
+                    bootstrap_servers=settings.KAFKA_BOOTSTRAP_SERVERS.split(','),
+                    client_id=f'{settings.APP_NAME}-admin'
+                )
+            
+            # 获取Topic描述
+            from kafka.admin import ConfigResource, ConfigResourceType
+            resource = ConfigResource(ConfigResourceType.TOPIC, topic)
+            configs = self.admin_client.describe_configs([resource])
+            
+            # 获取分区信息
+            cluster_metadata = self.admin_client.describe_topics([topic])
+            
+            return {
+                'config': {config[0]: config[1] for config in configs[resource].items()},
+                'partitions': cluster_metadata[topic].partitions
+            }
+        except Exception as e:
+            logger.error(f"Failed to get info for topic '{topic}': {e}")
+            return None
+
     async def close(self):
-        """Close all Kafka connections"""
+        """关闭所有Kafka连接"""
         self.running = False
         
-        # Close producer
+        # 关闭生产者
         if self.producer:
-            await self.producer.stop()
-            logger.info("AIOKafka producer closed")
+            try:
+                await self.producer.stop()
+                logger.info("Kafka producer closed")
+            except Exception as e:
+                logger.error(f"Error closing producer: {e}")
         
-        # Close consumers
+        # 关闭消费者
         for group_id, consumer in list(self.consumers.items()):
             try:
                 await consumer.stop()
-                logger.info(f"AIOKafka consumer for group {group_id} closed")
+                logger.info(f"Kafka consumer for group {group_id} closed")
             except Exception as e:
                 logger.error(f"Error closing consumer {group_id}: {e}")
         
-        # Close admin client
+        # 关闭Admin客户端
         if self.admin_client:
-            self.admin_client.close()
-            logger.info("Kafka admin client closed")
+            try:
+                self.admin_client.close()
+                logger.info("Kafka admin client closed")
+            except Exception as e:
+                logger.error(f"Error closing admin client: {e}")
         
-        logger.info("All AIOKafka connections closed")
+        logger.info("All Kafka connections closed")
 
-# Global AIOKafka manager instance
-kafka_manager = AIOKafkaManager()
+# 全局Kafka服务实例
+kafka_manager = KafkaService()

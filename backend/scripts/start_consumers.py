@@ -3,7 +3,7 @@
 import asyncio
 import signal
 import sys
-from foxmask.task.consumers import DocumentConsumer
+from backend.foxmask.core.message.consumers import DocumentConsumer
 
 async def main():
     consumer = DocumentConsumer()

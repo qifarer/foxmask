@@ -185,8 +185,8 @@ async def main():
     client = ChunkedUploadClient("http://localhost:8888/api/", token)
     # filename = "/Users/luoqi/Downloads/购物顾问智能体落地分析报告.md"
     # filename = "/Users/luoqi/Downloads/AI-A2A.drawio.png"
-    # filename = "/Users/luoqi/Downloads/普通高中教科书·数学必修 第一册.pdf"
-    filename = "/Users/luoqi/Downloads/sp_salebill_21.sql"
+    filename = "/Users/luoqi/Downloads/普通高中教科书·数学必修 第一册.pdf"
+    # filename = "/Users/luoqi/Downloads/sp_salebill_21.sql"
     
     try:
         result = await client.upload_file(

@@ -1,12 +1,11 @@
 # -*- coding: utf-8 -*-
-# MinIO client utilitys
+# MinIO client utility
 
-from minio import Minio,datatypes
-
+from minio import Minio, datatypes
 from minio.error import S3Error
 from typing import Optional, BinaryIO, Any, Dict, List, Union
 from io import BytesIO
-from datetime import timedelta,timezone, datetime
+from datetime import timedelta, timezone, datetime
 from foxmask.core.config import settings
 from foxmask.core.logger import logger
 
@@ -18,18 +17,37 @@ class MinIOClient:
             secret_key=settings.MINIO_SECRET_KEY.get_secret_value() if hasattr(settings.MINIO_SECRET_KEY, "get_secret_value") else settings.MINIO_SECRET_KEY,
             secure=settings.MINIO_SECURE
         )
-        self.bucket_name = settings.MINIO_BUCKET_NAME
+        # self.bucket_name = settings.MINIO_BUCKET_NAME
+        self.bucket_name = getattr(settings, 'MINIO_BUCKET_NAME', 'foxmask')
         self._ensure_bucket_exists()
 
     def _ensure_bucket_exists(self):
         """Ensure the bucket exists"""
         try:
-            if not self.client.bucket_exists(self.bucket_name):
-                self.client.make_bucket(self.bucket_name)
+            if not self.bucket_exists(self.bucket_name):
+                self.make_bucket(self.bucket_name)
                 logger.info(f"Created MinIO bucket: {self.bucket_name}")
         except S3Error as e:
             logger.error(f"Error ensuring bucket exists: {e}")
             raise
+
+    def bucket_exists(self, bucket_name: str) -> bool:
+        """Check if bucket exists"""
+        try:
+            return self.client.bucket_exists(bucket_name)
+        except S3Error as e:
+            logger.error(f"Error checking bucket existence: {e}")
+            return False
+
+    def make_bucket(self, bucket_name: str) -> bool:
+        """Create a bucket"""
+        try:
+            self.client.make_bucket(bucket_name)
+            logger.info(f"Bucket created: {bucket_name}")
+            return True
+        except S3Error as e:
+            logger.error(f"Error creating bucket: {e}")
+            return False
 
     def upload_file(
         self, 

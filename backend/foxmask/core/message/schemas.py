@@ -28,6 +28,13 @@ class BaseMessage(BaseModel):
     correlation_id: Optional[str] = Field(None, description="Correlation ID for tracing")
     metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
 
+class KnowledgeItemMessage(BaseMessage):
+    """Knowledge processing message schema"""
+    knowledge_item_id: str = Field(..., description="Knowledge item ID to process")
+    process_types: List[str] = Field(..., description="Types of processing to perform")
+    retry_count: int = Field(0, description="Number of retry attempts")
+    max_retries: int = Field(3, description="Maximum number of retries")
+
 class KnowledgeProcessingMessage(BaseMessage):
     """Knowledge processing message schema"""
     knowledge_item_id: str = Field(..., description="Knowledge item ID to process")

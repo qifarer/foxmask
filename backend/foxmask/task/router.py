@@ -8,8 +8,8 @@ from typing import Dict, Any, List
 
 from foxmask.shared.dependencies import require_admin, get_api_context
 from foxmask.task.services import task_service
-from foxmask.task.producers import task_producer
-from foxmask.task.consumers import task_consumer
+from foxmask.core.message.producers import task_producer
+from foxmask.core.message.consumers import task_consumer
 from foxmask.core.kafka import kafka_manager
 from foxmask.core.config import settings
 

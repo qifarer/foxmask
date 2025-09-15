@@ -1,7 +1,7 @@
 from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional, List, Dict, Any
 from datetime import datetime
-from .models import FileStatus, FileVisibility, FileType, ChunkStatus
+from ..models import FileStatus, FileVisibility, FileType, ChunkStatus
 
 # 基础配置
 class BaseSchema(BaseModel):
@@ -65,20 +65,6 @@ class FileCompleteUploadRequest(BaseSchema):
     checksum_md5: Optional[str] = Field(None, description="Complete file MD5 checksum")
     checksum_sha256: Optional[str] = Field(None, description="Complete file SHA256 checksum")
 
-# 上传进度响应
-class UploadProgressResponse(BaseSchema):
-    """Upload progress response"""
-    
-    file_id: str = Field(..., description="File ID")
-    filename: str = Field(..., description="Filename")
-    status: FileStatus = Field(..., description="Upload status")
-    uploaded_chunks: int = Field(..., ge=0, description="Number of uploaded chunks")
-    verified_chunks: int = Field(..., ge=0, description="Number of verified chunks")
-    total_chunks: int = Field(..., ge=0, description="Total number of chunks")
-    progress_percentage: float = Field(..., ge=0.0, le=100.0, description="Upload progress percentage")
-    estimated_time_remaining: Optional[float] = Field(None, ge=0, description="Estimated time remaining in seconds")
-    file_size: int = Field(..., description="Total file size in bytes")
-    uploaded_size: int = Field(..., description="Total uploaded size in bytes")
 
 # 分块状态响应
 class ChunkStatusResponse(BaseSchema):
@@ -170,23 +156,6 @@ class FileUpdateRequest(BaseSchema):
     visibility: Optional[FileVisibility] = Field(None, description="File visibility level")
     allowed_users: Optional[List[str]] = Field(None, description="List of user IDs with access")
     allowed_roles: Optional[List[str]] = Field(None, description="List of roles with access")
-
-# 文件处理作业响应
-class FileProcessingJobResponse(BaseSchema):
-    """File processing job response"""
-    
-    job_id: str = Field(..., description="Job ID")
-    file_id: str = Field(..., description="Target file ID")
-    job_type: str = Field(..., description="Processing job type")
-    status: str = Field(..., description="Job status")
-    priority: int = Field(..., description="Job priority")
-    parameters: Dict[str, Any] = Field(..., description="Processing parameters")
-    result: Optional[Dict[str, Any]] = Field(None, description="Processing result")
-    error_message: Optional[str] = Field(None, description="Error message")
-    retry_count: int = Field(..., description="Number of retries")
-    created_at: datetime = Field(..., description="Creation timestamp")
-    started_at: Optional[datetime] = Field(None, description="Start timestamp")
-    completed_at: Optional[datetime] = Field(None, description="Completion timestamp")
 
 # 错误响应
 class ErrorResponse(BaseSchema):

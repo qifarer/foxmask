@@ -11,7 +11,7 @@ from aiokafka.errors import KafkaError
 from foxmask.core.kafka import kafka_manager
 from foxmask.core.logger import logger
 from foxmask.core.config import settings
-from foxmask.core.schemas import (
+from foxmask.core.message.schemas import (
     KnowledgeProcessingMessage, FileProcessingMessage,
     NotificationMessage, SystemEventMessage, DataSyncMessage
 )
@@ -19,7 +19,7 @@ from foxmask.core.schemas import (
 from foxmask.knowledge.services.knowledge_processing import knowledge_processing_service
 from foxmask.file.services import file_service
 from foxmask.task.services import task_service
-from foxmask.task.dead_letter_processor import dead_letter_processor
+from foxmask.core.message.dead_letter_processor import dead_letter_processor
 from foxmask.tag.services import tag_service
 
 
@@ -28,7 +28,7 @@ class AIOTaskConsumer:
         self.consumers: Dict[str, AIOKafkaConsumer] = {}
         self.processors: Dict[str, Callable[[Dict[str, Any]], Any]] = {
             settings.KAFKA_KNOWLEDGE_TOPIC: self.process_knowledge_message,
-            "file_processing": self.process_file_message,
+            "file_processing": self.process_create_knowledge_item_from_file,
             "notifications": self.process_notification_message,
             "system_events": self.process_system_event_message,
             "data_sync": self.process_data_sync_message
@@ -80,37 +80,79 @@ class AIOTaskConsumer:
             logger.info(f"Starting to consume messages from topic: {topic}")
             
             async for message in kafka_manager.consume_messages(topic, group_id, processor):
+                print(f"====={str(message)}")
                 if not self.running:
                     break
                     
                 try:
+                    # 获取消息的值 - 这里需要根据实际的 message 结构进行调整
+                    # 如果 message 本身已经是字典，直接使用
+                    if isinstance(message, dict):
+                        message_data = message
+                    # 如果 message 有 value 属性，使用 message.value
+                    elif hasattr(message, 'value'):
+                        message_data = message.value
+                    # 其他情况，尝试将 message 转换为字典或直接使用
+                    else:
+                        message_data = message
+                    
                     # Process the message
-                    await processor(message.value)
+                    await processor(message_data)
                     
                     logger.debug(
-                        f"Successfully processed message {message.value.get('message_id')} "
+                        f"Successfully processed message {message_data.get('message_id')} "
                         f"from topic {topic}"
                     )
                     
                 except Exception as e:
                     logger.error(
-                        f"Error processing message {message.value.get('message_id')} "
+                        f"Error processing message {message_data.get('message_id')} "
                         f"from topic {topic}: {e}"
                     )
                     
                     # Send to dead letter queue
                     await dead_letter_processor.send_to_dlq(
-                        original_message=message.value,
+                        original_message=message_data,
                         failure_reason=str(e),
                         exception=e
                     )
-                    
+                
         except asyncio.CancelledError:
             logger.info(f"Consumer for topic {topic} was cancelled")
         except Exception as e:
             logger.error(f"Error in consumer for topic {topic}: {e}")
         finally:
             logger.info(f"Stopped consuming messages from topic: {topic}")
+            
+    async def process_create_knowledge_item_from_file(self, message_data: Dict[str, Any]):
+        try:
+            # Validate message schema
+            print(f"====message_data:{str(message_data)}")
+            message = FileProcessingMessage(**message_data)
+            print(f"====message:{str(message)}")
+            logger.info(
+                f"Processing process_create_knowledge_item_from_file {message.message_id} "
+                f"for item {message.file_id}"
+            )
+            # Process the knowledge item
+            await knowledge_processing_service.process_knowledge_item_from_file({
+                "file_id": message.file_id,
+                "process_types": message.processing_type,
+                "tenant_id": message.options.get("tenant_id"),
+                "filename": message.options.get("filename"),
+                "file_size": message.options.get("file_size"),
+                "file_type": message.options.get("file_type"),
+                "checksum_md5": message.options.get("checksum_md5"),
+                "checksum_sha256": message.options.get("checksum_sha256")
+               })
+            
+            logger.info(
+                f"Successfully processed knowledge message {message.message_id}"
+            )
+            
+        except Exception as e:
+            logger.error(f"Error processing knowledge message {message_data.get('message_id')}: {e}")
+            raise
 
     async def process_knowledge_message(self, message_data: Dict[str, Any]):
         """Process knowledge processing message"""
@@ -210,7 +252,7 @@ class AIOTaskConsumer:
                 f"Processing system event message {message.message_id}: "
                 f"{message.event_type} from {message.component}"
             )
-            
+        
             # TODO: Implement system event handling
             # await monitoring_service.record_event(
             #     event_type=message.event_type,

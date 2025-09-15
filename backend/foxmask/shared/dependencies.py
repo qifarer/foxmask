@@ -3,7 +3,7 @@
 # Shared dependencies for FastAPI routes and services
 
 from fastapi import Depends, Form, HTTPException, status, Header, Request, Security
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.security import HTTPBearer,APIKeyHeader, HTTPAuthorizationCredentials
 from typing import Optional, Callable, List, Dict, Any
 import time
 from jose import JWTError, jwt
@@ -12,9 +12,11 @@ from foxmask.core.config import settings
 from foxmask.core.logger import logger
 from foxmask.auth.services import auth_service
 from foxmask.utils.casdoor_client import casdoor_client
-from foxmask.file.schemas import ChunkUploadRequest
+from foxmask.file.api.schemas import ChunkUploadRequest
 import json
 from pydantic import ValidationError
+
+api_key_header = APIKeyHeader(name="Authorization", auto_error=False)
 
 async def get_chunk_upload_request(
     data: str = Form(..., description="JSON serialized ChunkUploadRequest")
@@ -81,7 +83,7 @@ async def verify_jwt_token(
             detail="Invalid or expired token",
             headers={"WWW-Authenticate": "Bearer"},
         )
-
+    
 async def get_user_from_token(
     token_payload: Dict[str, Any] = Depends(verify_jwt_token)
 ) -> Dict[str, Any]:
@@ -93,6 +95,7 @@ async def get_user_from_token(
             detail="Invalid token: missing user identifier",
         )
     
+    
     # 可以从令牌中获取更多用户信息，或者调用 Casdoor API 获取完整用户信息
     return {
         "user_id": user_id,
@@ -100,6 +103,19 @@ async def get_user_from_token(
         "email": token_payload.get("email"),
         "permissions": token_payload.get("permissions", []),
         "roles": token_payload.get("roles", [])
+    }
+
+async def get_context(
+    token_payload: Dict[str, Any] = Depends(verify_jwt_token),
+):
+    return {
+        "user_id": token_payload.get("sub"),
+        "username": token_payload.get("name"),
+        "email": token_payload.get("email"),
+        "permissions": token_payload.get("permissions", []),
+        "roles": token_payload.get("roles", []),
+        "tenant_id": "foxmask",  # 示例静态租户ID,
+        "tenantname": "foxmask"
     }
 
 # API Key 验证（兼容旧版）

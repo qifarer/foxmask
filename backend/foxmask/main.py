@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import strawberry
 from strawberry.fastapi import GraphQLRouter
+
 from contextlib import asynccontextmanager
 import datetime
 from datetime import timezone, datetime
@@ -16,14 +17,14 @@ from foxmask.core.mongo import  connect_to_mongo, close_mongo_connection, mongod
 from foxmask.core.kafka import kafka_manager
 from foxmask.core.scheduler import scheduler
 from foxmask.core.logger import logger, setup_logger
-from foxmask.task.consumers import task_consumer
-from foxmask.task.dead_letter_processor import dead_letter_processor
+from foxmask.core.message.consumers import task_consumer
+from foxmask.core.message.dead_letter_processor import dead_letter_processor
 from foxmask.core.middleware.error_handler import ErrorHandlerMiddleware, RateLimitMiddleware
 from foxmask.core.monitoring import monitoring_service
 
 # Import routers
 from foxmask.auth.router import router as auth_router
-from foxmask.file.router import router as file_router
+from foxmask.file.api.router import router as file_router
 from foxmask.knowledge.router import router as knowledge_router
 from foxmask.tag.router import router as tag_router
 from foxmask.task.router import router as task_router
@@ -39,6 +40,8 @@ from foxmask.file.mongo import init_file_db
 from foxmask.utils.weaviate_client import weaviate_client
 from foxmask.utils.neo4j_client import neo4j_client
 from foxmask.utils.minio_client import minio_client
+from foxmask.core.message.kafka_topic import setup_kafka_topics
+from foxmask.shared.dependencies import get_context
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -47,14 +50,13 @@ async def lifespan(app: FastAPI):
     # Startup
     await connect_to_mongo()
     await init_file_db()
-    #await kafka_manager.create_producer()
-    # Create Kafka topics
-    #await kafka_manager.create_topic(settings.KAFKA_KNOWLEDGE_TOPIC)
-    #await kafka_manager.create_topic("file_processing")
-    #await kafka_manager.create_topic("notifications")
-    #await kafka_manager.create_topic("system_events")
-    #await kafka_manager.create_topic("data_sync")
-    #await kafka_manager.create_topic("dead_letter_queue")
+    
+    # 设置所需Topic
+    await setup_kafka_topics()
+        
+    # 启动生产者
+    await kafka_manager.create_producer()
+    
     
     # Connect to Weaviate and Neo4j
     #await weaviate_client.connect()
@@ -64,10 +66,10 @@ async def lifespan(app: FastAPI):
     #await neo4j_client.ensure_constraints_exists()
     
     # Start task consumers
-    #await task_consumer.start_consumers()
+    await task_consumer.start_consumers()
     
     # Start scheduler
-    #scheduler.start()
+    scheduler.start()
     
     logger.info("Application started successfully")
     
@@ -76,11 +78,11 @@ async def lifespan(app: FastAPI):
     # Shutdown
     await close_mongo_connection()
     #await task_consumer.stop_consumers()
-    #await kafka_manager.close()
+    await kafka_manager.close()
     #await weaviate_client.close()
     #await neo4j_client.close()
-    #await task_consumer.stop_consumers()
-    #scheduler.shutdown()
+    await task_consumer.stop_consumers()
+    scheduler.shutdown()
     
     logger.info("Application shutdown complete")
 
@@ -112,6 +114,8 @@ app.include_router(tag_router, prefix="/api")
 app.include_router(task_router, prefix="/api")
 
 # Create GraphQL schema by combining all queries and mutations
+
+
 @strawberry.type
 class Query(
     FileQuery,
@@ -129,11 +133,8 @@ class Mutation(
     TaskMutation
 ):
     pass
-
 schema = strawberry.Schema(query=Query, mutation=Mutation)
-graphql_app = GraphQLRouter(schema)
-
-# Add GraphQL endpoint
+graphql_app = GraphQLRouter(schema, context_getter=get_context)
 app.include_router(graphql_app, prefix="/graphql")
 
 # Health check endpoint

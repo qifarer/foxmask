@@ -6,6 +6,7 @@ from enum import Enum
 from foxmask.utils.helpers import get_current_time
 
 class KnowledgeItemStatus(str, Enum):
+    PENDING = "pending"
     CREATED = "created"
     PARSING = "parsing"
     PARSED = "parsed"

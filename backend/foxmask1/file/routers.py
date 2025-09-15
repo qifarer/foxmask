@@ -7,7 +7,7 @@ import asyncio
 
 # from foxmask.core.casdoor_auth import get_current_user, get_current_active_user, get_admin_user
 from foxmask.file.services import file_service
-from foxmask.file.schemas import (
+from backend.foxmask.file.api.schemas import (
     FileResponse, FileListResponse, UploadResponse, PreSignedUrlResponse,
     FileCreateRequest, FileUpdateRequest, FileSearchRequest,
     FileChunkUploadRequest, FileChunkUploadResponse,
