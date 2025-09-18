@@ -19,8 +19,12 @@ from foxmask.core.exceptions import (
     ValidationError,
 )
 from foxmask.core.logger import logger
-from foxmask.core.message.producers import task_producer
-
+from foxmask.core.kafka import kafka_manager
+from foxmask.task.message.schemas import (
+    MessageTopicEnum,
+    MessageEventTypeEnum,
+    MessagePriorityEnum
+)
 from foxmask.file.models import (
     EXTENSION_FILE_TYPES,
     ChunkStatus,
@@ -492,22 +496,19 @@ class FileService:
             # 发送Kafka消息 - 文件上传完成
             
             try:
-                kafka_message = {
-                    "event_type": "FILE_UPLOAD_COMPLETED",
+                biz_data = {
+                    "type": MessageEventTypeEnum.CREATE_ITEM_FROM_FILE,
                     "file_id": file_id,
-                    "tenant_id": file.tenant_id,
+                    "tenant": file.tenant_id,
+                    "user": file.uploaded_by,
                     "filename": file.filename,
-                    "file_size": file.file_size,
-                    "file_type": file.file_type,
-                    "checksum_md5": checksum_md5,
-                    "checksum_sha256": checksum_sha256
+                    "priority": MessagePriorityEnum.NORMAL
                 }
-                await task_producer.produce_file_processing_task(
-                file_id=file_id, 
-                processing_type="create_item",
-                options=kafka_message,
-                priority="normal")
-                
+                await kafka_manager.send_message(
+                    topic=MessageTopicEnum.KB_PROCESSING,
+                    value=biz_data,
+                    key=file_id
+                )                                            
             except Exception as kafka_error:
                 # Kafka发送失败不应该影响主流程，但需要记录日志
                 logger.error(f"Failed to send Kafka message for file {file_id}: {kafka_error}")

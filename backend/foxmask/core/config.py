@@ -47,7 +47,7 @@ class Settings(BaseSettings):
     # Kafka
     KAFKA_BOOTSTRAP_SERVERS: str = Field("localhost:9092", env="KAFKA_BOOTSTRAP_SERVERS")
     KAFKA_GROUP_ID: str = Field("foxmask-group", env="KAFKA_GROUP_ID")
-    KAFKA_KNOWLEDGE_TOPIC: str = Field("KAFKA_KNOWLEDGE_TOPIC", env="KAFKA_KNOWLEDGE_TOPIC")
+    KAFKA_KNOWLEDGE_TOPIC: str = Field("knowledge_processing", env="KAFKA_KNOWLEDGE_TOPIC")
     
     # Weaviate
     WEAVIATE_URL: AnyUrl = Field("http://localhost:8080", env="WEAVIATE_URL")

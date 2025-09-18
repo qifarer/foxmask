@@ -1,154 +1,277 @@
-from typing import Optional, List
-from fastapi import HTTPException, status
-from foxmask.core.logger import logger
-from foxmask.core.kafka import kafka_manager
-from foxmask.core.config import settings
+# -*- coding: utf-8 -*-
+# foxmask/knowledge/services/knowledge_item_service.py
+# Copyright (C) 2025 FoxMask Inc.
+# author: Roky
 
-from ..models.knowledge_item import KnowledgeItem, KnowledgeItemStatus, KnowledgeItemType
-from ..schemas import KnowledgeItemCreate, KnowledgeItemUpdate
+from typing import List, Optional, Dict, Any
+
+from foxmask.knowledge.models import (
+    KnowledgeItem, 
+    KnowledgeItemStatusEnum, 
+    KnowledgeItemTypeEnum,
+    KnowledgeItemContent,
+    ItemContentTypeEnum
+)
+from foxmask.knowledge.repositories import (
+    knowledge_item_repository,
+    knowledge_item_content_repository
+)
+from foxmask.core.model import Visibility
+from foxmask.utils.helpers import get_current_time
+
 
 class KnowledgeItemService:
-    async def create_knowledge_item(self, item_data: KnowledgeItemCreate, user_id: str) -> KnowledgeItem:
-        """Create a new knowledge item"""
-        try:
-            knowledge_item = KnowledgeItem(
-                **item_data.model_dump(exclude={"knowledge_base_ids"}),
-                created_by=user_id
-            )
-            
-            # Add to knowledge bases if specified
-            for kb_id in item_data.knowledge_base_ids:
-                knowledge_item.add_to_knowledge_base(kb_id)
-            
-            await knowledge_item.insert()
-            logger.info(f"Knowledge item created: {knowledge_item.title} by user {user_id}")
-            
-            # Send Kafka message for processing
-            await self._send_processing_message(knowledge_item)
-            
-            return knowledge_item
-            
-        except Exception as e:
-            logger.error(f"Error creating knowledge item: {e}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to create knowledge item: {e}"
-            )
-
-    async def get_knowledge_item(self, item_id: str) -> Optional[KnowledgeItem]:
-        """Get knowledge item by ID"""
-        return await KnowledgeItem.get(item_id)
-
-    async def update_knowledge_item(
-        self, 
-        item_id: str, 
-        update_data: KnowledgeItemUpdate, 
-        user_id: str
-    ) -> Optional[KnowledgeItem]:
-        """Update knowledge item"""
-        knowledge_item = await self.get_knowledge_item(item_id)
-        if not knowledge_item:
-            return None
-        
-        # Check permission
-        if knowledge_item.created_by != user_id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Not authorized to update this knowledge item"
-            )
-        
-        # Update fields
-        update_dict = update_data.model_dump(exclude_unset=True)
-        for field, value in update_dict.items():
-            setattr(knowledge_item, field, value)
-        
-        knowledge_item.update_status(KnowledgeItemStatus.CREATED)
-        await knowledge_item.save()
-        
-        # Send Kafka message for reprocessing
-        await self._send_processing_message(knowledge_item)
-        
-        logger.info(f"Knowledge item updated: {item_id} by user {user_id}")
-        return knowledge_item
-
-    async def delete_knowledge_item(self, item_id: str, user_id: str) -> bool:
-        """Delete knowledge item"""
-        knowledge_item = await self.get_knowledge_item(item_id)
-        if not knowledge_item:
-            return False
-        
-        # Check permission
-        if knowledge_item.created_by != user_id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Not authorized to delete this knowledge item"
-            )
-        
-        await knowledge_item.delete()
-        logger.info(f"Knowledge item deleted: {item_id} by user {user_id}")
-        return True
-
-    async def list_user_knowledge_items(
-        self, 
-        user_id: str, 
-        skip: int = 0, 
-        limit: int = 10
-    ) -> List[KnowledgeItem]:
-        """List knowledge items created by a user"""
-        return await KnowledgeItem.find(
-            KnowledgeItem.created_by == user_id
-        ).skip(skip).limit(limit).to_list()
-
-    async def add_to_knowledge_base(self, item_id: str, kb_id: str, user_id: str) -> bool:
-        """Add knowledge item to knowledge base"""
-        knowledge_item = await self.get_knowledge_item(item_id)
-        if not knowledge_item:
-            return False
-        
-        # Check permission
-        if knowledge_item.created_by != user_id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Not authorized to modify this knowledge item"
-            )
-        
-        knowledge_item.add_to_knowledge_base(kb_id)
-        await knowledge_item.save()
-        
-        logger.info(f"Knowledge item {item_id} added to knowledge base {kb_id}")
-        return True
-
-    async def remove_from_knowledge_base(self, item_id: str, kb_id: str, user_id: str) -> bool:
-        """Remove knowledge item from knowledge base"""
-        knowledge_item = await self.get_knowledge_item(item_id)
-        if not knowledge_item:
-            return False
-        
-        # Check permission
-        if knowledge_item.created_by != user_id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Not authorized to modify this knowledge item"
-            )
-        
-        knowledge_item.remove_from_knowledge_base(kb_id)
-        await knowledge_item.save()
-        
-        logger.info(f"Knowledge item {item_id} removed from knowledge base {kb_id}")
-        return True
-
-    async def _send_processing_message(self, knowledge_item: KnowledgeItem):
-        """Send Kafka message for knowledge item processing"""
-        message = {
-            "knowledge_item_id": str(knowledge_item.id),
-            "type": knowledge_item.type,
-            "process_types": ["parse", "vectorize", "graph"]  # Default processing types
+    """知识条目业务逻辑层"""
+    
+    def __init__(self):
+        # 修正：直接使用导入的实例，不要再次调用
+        self.item_repo = knowledge_item_repository
+        self.content_repo = knowledge_item_content_repository
+    
+    async def create_knowledge_item(
+        self,
+        title: str,
+        item_type: KnowledgeItemTypeEnum,
+        tenant_id: str,
+        created_by: str,
+        description: Optional[str] = None,
+        tags: Optional[List[str]] = None,
+        category: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        visibility: Visibility = Visibility.PRIVATE,
+        allowed_users: Optional[List[str]] = None,
+        allowed_roles: Optional[List[str]] = None,
+        content: Optional[Dict[str, Any]] = None
+    ) -> KnowledgeItem:
+        """创建知识条目"""
+        item_data = {
+            "title": title,
+            "item_type": item_type,
+            "tenant_id": tenant_id,
+            "created_by": created_by,
+            "description": description,
+            "tags": tags or [],
+            "category": category,
+            "metadata": metadata or {},
+            "visibility": visibility,
+            "allowed_users": allowed_users or [],
+            "allowed_roles": allowed_roles or [],
+            "content": content or {},
+            "status": KnowledgeItemStatusEnum.CREATED
         }
         
-        try:
-            await kafka_manager.send_message(settings.KAFKA_KNOWLEDGE_TOPIC, message)
-            logger.info(f"Processing message sent for knowledge item: {knowledge_item.id}")
-        except Exception as e:
-            logger.error(f"Failed to send processing message: {e}")
-
+        return await self.item_repo.create_item(item_data)
+    
+    async def get_knowledge_item(self, item_id: str, tenant_id: str) -> Optional[KnowledgeItem]:
+        """获取知识条目详情"""
+        return await self.item_repo.get_item_by_id(item_id, tenant_id)
+    
+    async def update_knowledge_item(
+        self,
+        item_id: str,
+        tenant_id: str,
+        update_data: Dict[str, Any]
+    ) -> Optional[KnowledgeItem]:
+        """更新知识条目"""
+        # 验证用户权限（这里可以添加更复杂的权限验证逻辑）
+        return await self.item_repo.update_item(item_id, tenant_id, update_data)
+    
+    async def delete_knowledge_item(self, item_id: str, tenant_id: str) -> bool:
+        """删除知识条目"""
+        # 先删除关联的内容
+        await KnowledgeItemContent.find(
+            KnowledgeItemContent.item_id == item_id,
+            KnowledgeItemContent.tenant_id == tenant_id
+        ).delete()
+        
+        # 再删除条目
+        return await self.item_repo.delete_item(item_id, tenant_id)
+    
+    async def list_knowledge_items(
+        self,
+        tenant_id: str,
+        item_type: Optional[KnowledgeItemTypeEnum] = None,
+        status: Optional[KnowledgeItemStatusEnum] = None,
+        visibility: Optional[Visibility] = None,
+        created_by: Optional[str] = None,
+        tags: Optional[List[str]] = None,
+        category: Optional[str] = None,
+        search_text: Optional[str] = None,
+        page: int = 1,
+        page_size: int = 20,
+        sort_by: str = "created_at",
+        sort_order: str = "desc"
+    ) -> List[KnowledgeItem]:
+        """查询知识条目列表"""
+        return await self.item_repo.list_items(
+            tenant_id=tenant_id,
+            item_type=item_type,
+            status=status,
+            visibility=visibility,
+            created_by=created_by,
+            tags=tags,
+            category=category,
+            search_text=search_text,
+            page=page,
+            page_size=page_size,
+            sort_by=sort_by,
+            sort_order=sort_order
+        )
+    
+    async def count_knowledge_items(
+        self,
+        tenant_id: str,
+        item_type: Optional[KnowledgeItemTypeEnum] = None,
+        status: Optional[KnowledgeItemStatusEnum] = None,
+        visibility: Optional[Visibility] = None,
+        created_by: Optional[str] = None,
+        tags: Optional[List[str]] = None,
+        category: Optional[str] = None,
+        search_text: Optional[str] = None
+    ) -> int:
+        """统计知识条目数量"""
+        return await self.item_repo.count_items(
+            tenant_id=tenant_id,
+            item_type=item_type,
+            status=status,
+            visibility=visibility,
+            created_by=created_by,
+            tags=tags,
+            category=category,
+            search_text=search_text
+        )
+    
+    async def update_item_status(
+        self,
+        item_id: str,
+        tenant_id: str,
+        status: KnowledgeItemStatusEnum,
+        processing_metadata: Optional[Dict[str, Any]] = None,
+        error_info: Optional[Dict[str, Any]] = None
+    ) -> Optional[KnowledgeItem]:
+        """更新知识条目状态"""
+        return await self.item_repo.update_item_status(
+            item_id, tenant_id, status, processing_metadata, error_info
+        )
+    
+    async def add_content_to_item(
+        self,
+        item_id: str,
+        content_type: ItemContentTypeEnum,
+        content_data: Dict[str, Any],
+        tenant_id: str,
+        created_by: str,
+        processing_metadata: Optional[Dict[str, Any]] = None,
+        error_info: Optional[Dict[str, Any]] = None
+    ) -> KnowledgeItemContent:
+        """为知识条目添加内容"""
+        # 验证条目存在
+        item = await self.get_knowledge_item(item_id, tenant_id)
+        if not item:
+            raise ValueError(f"Knowledge item {item_id} not found")
+        
+        content_data = {
+            "item_id": item_id,
+            "content_type": content_type,
+            "content_data": content_data,
+            "tenant_id": tenant_id,
+            "created_by": created_by,
+            "processing_metadata": processing_metadata or {},
+            "error_info": error_info
+        }
+        
+        return await self.content_repo.create_new_content_version(content_data, tenant_id)
+    
+    async def get_item_content(
+        self,
+        item_id: str,
+        content_type: ItemContentTypeEnum,
+        tenant_id: str,
+        version: Optional[int] = None
+    ) -> Optional[KnowledgeItemContent]:
+        """获取知识条目内容"""
+        if version:
+            # 获取特定版本
+            return await KnowledgeItemContent.find_one(
+                KnowledgeItemContent.item_id == item_id,
+                KnowledgeItemContent.content_type == content_type,
+                KnowledgeItemContent.version == version,
+                KnowledgeItemContent.tenant_id == tenant_id
+            )
+        else:
+            # 获取最新版本
+            return await self.content_repo.get_latest_content(item_id, content_type, tenant_id)
+    
+    async def get_item_content_versions(
+        self,
+        item_id: str,
+        content_type: ItemContentTypeEnum,
+        tenant_id: str,
+        page: int = 1,
+        page_size: int = 10
+    ) -> List[KnowledgeItemContent]:
+        """获取内容的所有版本"""
+        return await self.content_repo.get_content_versions(
+            item_id, content_type, tenant_id, page, page_size
+        )
+    
+    async def add_tag_to_item(self, item_id: str, tenant_id: str, tag: str) -> Optional[KnowledgeItem]:
+        """为知识条目添加标签"""
+        return await self.item_repo.add_tag_to_item(item_id, tenant_id, tag)
+    
+    async def remove_tag_from_item(self, item_id: str, tenant_id: str, tag: str) -> Optional[KnowledgeItem]:
+        """从知识条目移除标签"""
+        return await self.item_repo.remove_tag_from_item(item_id, tenant_id, tag)
+    
+    async def change_item_visibility(
+        self,
+        item_id: str,
+        tenant_id: str,
+        visibility: Visibility
+    ) -> Optional[KnowledgeItem]:
+        """更改知识条目可见性"""
+        item = await self.get_knowledge_item(item_id, tenant_id)
+        if not item:
+            return None
+        
+        item.change_visibility(visibility)
+        await item.save()
+        return item
+    
+    async def check_item_access(
+        self,
+        item_id: str,
+        tenant_id: str,
+        user_id: str,
+        user_roles: List[str]
+    ) -> bool:
+        """检查用户对知识条目的访问权限"""
+        item = await self.get_knowledge_item(item_id, tenant_id)
+        if not item:
+            return False
+        
+        return item.has_access(user_id, user_roles)
+    
+    async def batch_get_items(self, item_ids: List[str], tenant_id: str) -> List[KnowledgeItem]:
+        """批量获取知识条目"""
+        return await self.item_repo.get_items_by_ids(item_ids, tenant_id)
+    
+    async def batch_update_items_status(
+        self,
+        item_ids: List[str],
+        tenant_id: str,
+        status: KnowledgeItemStatusEnum,
+        processing_metadata: Optional[Dict[str, Any]] = None
+    ) -> List[KnowledgeItem]:
+        """批量更新知识条目状态"""
+        updated_items = []
+        for item_id in item_ids:
+            item = await self.update_item_status(
+                item_id, tenant_id, status, processing_metadata
+            )
+            if item:
+                updated_items.append(item)
+        return updated_items
+    
+# 创建服务实例
 knowledge_item_service = KnowledgeItemService()

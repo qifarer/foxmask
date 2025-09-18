@@ -1,7 +1,11 @@
 # Knowledge services initialization
-from .knowledge_item import KnowledgeItemService, knowledge_item_service
-from .knowledge_base import KnowledgeBaseService, knowledge_base_service
-from .knowledge_processing import KnowledgeProcessingService, knowledge_processing_service
-
-__all__ = ["KnowledgeItemService", "KnowledgeBaseService", "KnowledgeProcessingService",
-           "knowledge_item_service", "knowledge_base_service", "knowledge_processing_service"]
+from .knowledge_item import knowledge_item_service
+from .knowledge_base import knowledge_base_service
+from .knowledge_processing import knowledge_processing_service
+from .pdf_parser import pdf_parser_service
+__all__ = [
+    "knowledge_item_service",
+    "knowledge_base_service",
+    "knowledge_processing_service",
+    "pdf_parser_service",
+]

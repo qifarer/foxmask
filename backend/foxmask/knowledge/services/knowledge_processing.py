@@ -3,99 +3,200 @@
 
 from datetime import datetime
 import json
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from foxmask.core.logger import logger
 from foxmask.core.kafka import kafka_manager
 from foxmask.core.config import settings
-from foxmask.utils.helpers import generate_uuid
+from foxmask.utils.helpers import generate_uuid,convert_objectids_to_strings
 
-from ..models.knowledge_item import KnowledgeItem, KnowledgeItemStatus,KnowledgeItemType
+from foxmask.core.model import Visibility
+from foxmask.knowledge.models import (
+   KnowledgeItem,
+   ItemContentTypeEnum,
+   KnowledgeItemStatusEnum,
+   KnowledgeItemTypeEnum
+)    
+from foxmask.file.repositories import file_repository
+from foxmask.knowledge.repositories import (
+    knowledge_item_repository,knowledge_item_content_repository
+)    
+from foxmask.task.message import (
+    MessageTopicEnum,
+    MessageEventTypeEnum,
+    KnowledgeProcessingMessage
+)    
+
+from .knowledge_item import knowledge_item_service
 from .knowledge_graph import knowledge_graph_service
 from .vector_search import vector_search_service
+from .knowledge_parser import knowledge_parser_service
 
 class KnowledgeProcessingService:
-    async def process_knowledge_item_from_file(self, message: Dict[str, Any]):
+    
+    async def process_knowledge(self, message: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """
+        Process a knowledge item with Weaviate and Neo4j integration.
+        
+        Args:
+            message: Input message dictionary containing event data.
+            
+        Returns:
+            Optional[Dict[str, Any]]: Result of processing or error response.
+        """
+        # 获取 data_value，检查是否为字典
+        data_value = message.get('value', {})
+        if not isinstance(data_value, dict):
+            logger.error(f"Invalid data_value, expected dict, got {type(data_value)}: {message}")
+            return {
+                "status": "error",
+                "event_type": "unknown",
+                "error": "Invalid data_value type",
+                "message": "data_value must be a dictionary"
+            }
+
+        # 获取 event_type，转换为字符串并规范化
+        event_type = data_value.get('type')
+        if event_type is None:
+            logger.error(f"Missing event_type in message: {message}")
+            return {
+                "status": "error",
+                "event_type": "unknown",
+                "error": "Missing event_type",
+                "message": "Event type is required"
+            }
+
+        # 转换为字符串并清理
+        event_type = str(event_type).strip().lower()
+        # 尝试将 event_type 转换为 MessageEventTypeEnum
+        try:
+            event_type_enum = MessageEventTypeEnum(event_type)
+        except ValueError:
+            logger.error(f"Invalid event_type: '{event_type}', valid types: {[e.value for e in MessageEventTypeEnum]}")
+            return await self._handle_unknown_event_type(message)
+
+        # 使用 match-case 处理事件类型
+        try:
+            match event_type_enum:
+                case MessageEventTypeEnum.CREATE_ITEM_FROM_FILE:
+                    return await self._process_create_from_file(message)
+                case MessageEventTypeEnum.CREATE_ITEM_FROM_CHAT:
+                    return await self._process_create_from_chat(message)
+                case MessageEventTypeEnum.PARSE_MD_FROM_SOURCE:
+                    return await self._process_parse_md_from_source(message)
+                case MessageEventTypeEnum.PARSE_JSON_FROM_SOURCE:
+                    return await self._process_parse_json_from_source(message)
+                case MessageEventTypeEnum.VECTORIZED_KNOWLEDGE:
+                    return await self._process_vectorized_knowledge(message)
+                case MessageEventTypeEnum.GRAPH_KNOWLEDGE:
+                    return await self._process_graph_knowledge(message)
+                case _:
+                    logger.error(f"Unexpected event_type_enum: {event_type_enum}")
+                    return await self._handle_unknown_event_type(message)
+
+        except ValueError as ve:
+            logger.error(f"ValueError processing event_type '{event_type}': {str(ve)}")
+            return {
+                "status": "error",
+                "event_type": event_type,
+                "error": str(ve),
+                "message": f"Failed to process event type: {event_type}"
+            }
+        except Exception as e:
+            logger.error(f"Unexpected error processing event_type '{event_type}': {str(e)}", exc_info=True)
+            return {
+                "status": "error",
+                "event_type": event_type,
+                "error": str(e),
+                "message": f"Unexpected error processing event type: {event_type}"
+            }
+    
+    async def _process_create_from_file(self, message: Dict[str, Any]):
+        logger.info(f"_process_create_from_file:{message}")
         """Process a knowledge item creation request from a file"""
-        file_id = message.get("file_id")
+        file_id = message.get("key")
         if not file_id:
             logger.error("Missing file_id in knowledge item creation message")
             return
         
         try:
-            # Create knowledge item from file metadata
-            knowledge_item = KnowledgeItem(
-                title=message.get("title", f"Knowledge Item from File {file_id}"),
-                description=message.get("description", ""),
-                type=KnowledgeItemType.FILE,
-                status=KnowledgeItemStatus.PENDING,
-                source_urls=message.get("source_urls", []),
-                file_ids=[file_id],
-                tags=message.get("tags", []),
-                category=message.get("category", "general"),
-                created_by=message.get("created_by", "system"),
-                created_at=datetime.utcnow(),
-                updated_at=datetime.utcnow()
+            # 获取文件对象
+            file = await file_repository.get_file_by_file_id(file_id)
+            if not file:
+                logger.error(f"File not found with file_id: {file_id}")
+                return
+            
+            # 创建知识条目
+            item_data = {
+                "title": file.filename,
+                "description": file.description,
+                "tags": ["FILE"],
+                "category": "File",
+                "metadata": {},
+                "tenant_id": file.tenant_id,
+                "visibility": file.visibility,
+                "allowed_users": file.allowed_users,
+                "allowed_roles": file.allowed_roles,
+                "created_by": file.uploaded_by,
+                "item_type": KnowledgeItemTypeEnum.FILE,
+                "status": KnowledgeItemStatusEnum.CREATED,
+                "content": {
+                    "source": [{
+                        "content_id":"",
+                        "file_id": file_id, 
+                        "filename": file.filename, 
+                        "bucket_name": file.minio_bucket,
+                        "object_name": file.minio_object_name,
+                        "created_at": file.created_at
+                    }]
+                },
+                "processing_metadata": {},
+            }
+            
+            # 创建知识条目
+            item = await knowledge_item_repository.create_item(item_data)
+            
+            # 创建知识项内容
+            item_content = {
+                "title": file.filename,
+                "description": file.description,
+                "tags": ["FILE"],
+                "category": "File",
+                "tenant_id": file.tenant_id,
+                "item_id": convert_objectids_to_strings(item.id),
+                "content_type": ItemContentTypeEnum.SOURCE,
+                "content_data": file.model_dump() , # 使用 model_dump() 而不是 to_dict()
+                "created_by":file.uploaded_by
+            }
+            
+            content = await knowledge_item_content_repository.create_content(item_content)
+            logger.info(f"Knowledge item created from file {file_id}: {item.id}")
+            
+            # 可选：触发进一步处理（解析、向量化、图谱化）
+            processing_message = {
+                "item_id": item.id,
+                "type": MessageEventTypeEnum.PARSE_MD_FROM_SOURCE
+            }
+            await kafka_manager.send_message(
+                topic=MessageTopicEnum.KB_PROCESSING,
+                value=processing_message,
+                key=item.id
             )
-            await knowledge_item.insert()
             
-            logger.info(f"Knowledge item created from file {file_id}: {knowledge_item.id}")
-            
-            #id =  generate_uuid()
-            # Optionally, trigger further processing (parsing, vectorization, graphing)
-            #processing_message = {
-            #    "knowledge_item_id": id,
-            #    "process_types": ["parse", "vectorize", "graph"]
-            #}
-            #await kafka_manager.send_message(
-            #    topic=settings.KAFKA_KNOWLEDGE_TOPIC,
-            #    value=processing_message,
-            #    key=id
-            #)
-            #logger.info(f"Processing message sent for knowledge item {id}")
+            processing_message = {
+                "type": MessageEventTypeEnum.PARSE_JSON_FROM_SOURCE,
+                "item_id": item.id,
+                "tenant_id": item.tenant_id,
+            }
+            await kafka_manager.send_message(
+                topic=MessageTopicEnum.KB_PROCESSING,
+                value=processing_message,
+                key=item.id
+            )
+            logger.info(f"Processing message sent for knowledge item {item.id}")
             
         except Exception as e:
             logger.error(f"Error creating knowledge item from file {file_id}: {e}")
-    
-    async def process_knowledge_item(self, message: Dict[str, Any]):
-        """Process a knowledge item with Weaviate and Neo4j integration"""
-        knowledge_item_id = message.get("knowledge_item_id")
-        process_types = message.get("process_types", [])
-        
-        if not knowledge_item_id:
-            logger.error("Missing knowledge_item_id in processing message")
-            return
-        
-        # Get knowledge item
-        knowledge_item = await KnowledgeItem.get(knowledge_item_id)
-        if not knowledge_item:
-            logger.error(f"Knowledge item not found: {knowledge_item_id}")
-            return
-        
-        try:
-            # Update status to processing
-            knowledge_item.update_status(KnowledgeItemStatus.PROCESSING)
-            await knowledge_item.save()
-            
-            # Perform processing based on types
-            if "parse" in process_types:
-                await self._parse_content(knowledge_item)
-            
-            if "vectorize" in process_types:
-                await self._vectorize_content(knowledge_item)
-            
-            if "graph" in process_types:
-                await self._create_graph_relations(knowledge_item)
-            
-            # Update status to completed
-            knowledge_item.update_status(KnowledgeItemStatus.COMPLETED)
-            await knowledge_item.save()
-            
-            logger.info(f"Knowledge item processed successfully: {knowledge_item_id}")
-            
-        except Exception as e:
-            logger.error(f"Error processing knowledge item {knowledge_item_id}: {e}")
-            knowledge_item.update_status(KnowledgeItemStatus.FAILED)
-            await knowledge_item.save()
+            # 可以考虑添加更详细的错误处理和重试逻辑       
 
     async def _parse_content(self, knowledge_item: KnowledgeItem):
         """Parse knowledge item content"""
@@ -111,8 +212,46 @@ class KnowledgeProcessingService:
             }
         }
         
-        knowledge_item.update_status(KnowledgeItemStatus.PARSED)
+        knowledge_item.update_status(KnowledgeItemStatusEnum.PARSED)
         await knowledge_item.save()
+
+    async def _process_create_from_chat(self, message: Dict[str, Any]):
+        logger.info(f"_process_create_from_chat:{message}")
+     
+        
+    async def _process_parse_md_from_source(self, message: Dict[str, Any]):
+        logger.info(f"_process_parse_md_from_source:{message}")
+
+        item_id = message.get("key","")
+        data_value = message.get('value', {})
+        tenant_id = data_value.get('tenant_id',"")
+        #2、调用解析服务
+        await knowledge_parser_service.parse_knowledge_item_to_md(item_id,tenant_id)
+        #4、触发下一步指令
+   
+
+    async def _process_parse_json_from_source(self, message: Dict[str, Any]):
+        logger.info(f"_process_parse_json_from_source:{message}")
+        item_id = message.get("key","")
+        data_value = message.get('value', {})
+        tenant_id = data_value.get('tenant_id',"")
+        #1、解析开始
+        await knowledge_item_repository.update_item_status(item_id,tenant_id,KnowledgeItemStatusEnum.PARSING)
+        #2、调用解析服务
+        await knowledge_parser_service.parse_knowledge_item_to_json(item_id,tenant_id)
+        #3、修改状态
+        await knowledge_item_repository.update_item_status(item_id,tenant_id,KnowledgeItemStatusEnum.PARSED)
+        #4、触发下一步指令
+   
+    async def _process_vectorized_knowledge(self, message: Dict[str, Any]):
+        logger.info(f"_process_vectorized_knowledge:{message}")
+
+    async def _process_graph_knowledge(self, message: Dict[str, Any]):
+        logger.info(f"_process_graph_knowledge:{message}")
+
+    async def _handle_unknown_event_type(self, message: Dict[str, Any]):
+        logger.info(f"_handle_unknown_event_type:{message}")
+
 
     async def _vectorize_content(self, knowledge_item: KnowledgeItem):
         """Vectorize knowledge item content and index in Weaviate"""
@@ -140,7 +279,7 @@ class KnowledgeProcessingService:
             
             if weaviate_id:
                 knowledge_item.vector_id = weaviate_id
-                knowledge_item.update_status(KnowledgeItemStatus.VECTORIZED)
+                knowledge_item.update_status(KnowledgeItemStatusEnum.VECTORIZED)
                 await knowledge_item.save()
                 
                 logger.info(f"Content vectorized for knowledge item: {knowledge_item.id}")
@@ -173,7 +312,7 @@ class KnowledgeProcessingService:
             
             if neo4j_id:
                 knowledge_item.graph_id = neo4j_id
-                knowledge_item.update_status(KnowledgeItemStatus.COMPLETED)
+                knowledge_item.update_status(KnowledgeItemStatusEnum.COMPLETED)
                 await knowledge_item.save()
                 
                 logger.info(f"Graph relations created for knowledge item: {knowledge_item.id}")

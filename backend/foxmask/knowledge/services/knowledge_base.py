@@ -1,111 +1,179 @@
-from typing import Optional, List
-from fastapi import HTTPException, status
-from foxmask.core.logger import logger
-
-from ..models.knowledge_base import KnowledgeBase
-from ..models.knowledge_item import KnowledgeItem
-from ..schemas import KnowledgeBaseCreate, KnowledgeBaseUpdate
+# foxmask/knowledge/services/knowledge_base.py
+from typing import List, Optional, Dict, Any
+from beanie import PydanticObjectId
+from foxmask.knowledge.models import (
+    KnowledgeBase, 
+    KnowledgeBaseStatusEnum
+)
+from foxmask.knowledge.repositories import knowledge_base_repository
+from foxmask.core.model import Visibility
+from foxmask.utils.helpers import get_current_time
 
 class KnowledgeBaseService:
-    async def create_knowledge_base(self, kb_data: KnowledgeBaseCreate, user_id: str) -> KnowledgeBase:
-        """Create a new knowledge base"""
-        try:
-            knowledge_base = KnowledgeBase(
-                **kb_data.model_dump(),
-                created_by=user_id
-            )
-            
-            await knowledge_base.insert()
-            logger.info(f"Knowledge base created: {knowledge_base.name} by user {user_id}")
-            return knowledge_base
-            
-        except Exception as e:
-            logger.error(f"Error creating knowledge base: {e}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to create knowledge base: {e}"
-            )
-
-    async def get_knowledge_base(self, kb_id: str) -> Optional[KnowledgeBase]:
-        """Get knowledge base by ID"""
-        return await KnowledgeBase.get(kb_id)
-
-    async def update_knowledge_base(
+    """知识库业务逻辑层"""
+    
+    def __init__(self):
+        self.repository = knowledge_base_repository
+    
+    async def create_knowledge_base(
+        self,
+        title: str,
+        tenant_id: str,
+        created_by: str,
+        description: Optional[str] = None,
+        tags: Optional[List[str]] = None,
+        category: Optional[str] = None,
+        visibility: Visibility = Visibility.PRIVATE,
+        allowed_users: Optional[List[str]] = None,
+        allowed_roles: Optional[List[str]] = None,
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> KnowledgeBase:
+        """创建知识库"""
+        knowledge_base = KnowledgeBase(
+            title=title,
+            description=description,
+            tags=tags or [],
+            category=category,
+            tenant_id=tenant_id,
+            created_by=created_by,
+            visibility=visibility,
+            allowed_users=allowed_users or [],
+            allowed_roles=allowed_roles or [],
+            metadata=metadata or {},
+            items={},
+            item_count=0,
+            status=KnowledgeBaseStatusEnum.DRAFT
+        )
+        
+        return await self.repository.create(knowledge_base)
+    
+    async def get_knowledge_base(
         self, 
-        kb_id: str, 
-        update_data: KnowledgeBaseUpdate, 
-        user_id: str
+        id: PydanticObjectId, 
+        tenant_id: str
     ) -> Optional[KnowledgeBase]:
-        """Update knowledge base"""
-        knowledge_base = await self.get_knowledge_base(kb_id)
+        """获取知识库"""
+        return await self.repository.get_by_id_and_tenant(id, tenant_id)
+    
+    async def list_knowledge_bases(
+        self,
+        tenant_id: str,
+        skip: int = 0,
+        limit: int = 100,
+        status: Optional[KnowledgeBaseStatusEnum] = None,
+        category: Optional[str] = None
+    ) -> List[KnowledgeBase]:
+        """列出知识库"""
+        return await self.repository.list_by_tenant(
+            tenant_id, skip, limit, status, category
+        )
+    
+    async def list_user_knowledge_bases(
+        self,
+        tenant_id: str,
+        user_id: str,
+        skip: int = 0,
+        limit: int = 100,
+        status: Optional[KnowledgeBaseStatusEnum] = None
+    ) -> List[KnowledgeBase]:
+        """列出用户有权限访问的知识库"""
+        return await self.repository.list_by_user(
+            tenant_id, user_id, skip, limit, status
+        )
+    
+    async def update_knowledge_base(
+        self,
+        id: PydanticObjectId,
+        tenant_id: str,
+        **update_data
+    ) -> Optional[KnowledgeBase]:
+        """更新知识库"""
+        knowledge_base = await self.repository.get_by_id_and_tenant(id, tenant_id)
         if not knowledge_base:
             return None
         
-        # Check permission
-        if knowledge_base.created_by != user_id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Not authorized to update this knowledge base"
-            )
+        # 过滤允许更新的字段
+        allowed_fields = {
+            'title', 'description', 'tags', 'category', 'metadata',
+            'visibility', 'allowed_users', 'allowed_roles'
+        }
         
-        # Update fields
-        update_dict = update_data.model_dump(exclude_unset=True)
-        for field, value in update_dict.items():
-            setattr(knowledge_base, field, value)
+        for field, value in update_data.items():
+            if field in allowed_fields and hasattr(knowledge_base, field):
+                setattr(knowledge_base, field, value)
         
-        knowledge_base.update_timestamp()
-        await knowledge_base.save()
-        
-        logger.info(f"Knowledge base updated: {kb_id} by user {user_id}")
-        return knowledge_base
-
-    async def delete_knowledge_base(self, kb_id: str, user_id: str) -> bool:
-        """Delete knowledge base"""
-        knowledge_base = await self.get_knowledge_base(kb_id)
-        if not knowledge_base:
-            return False
-        
-        # Check permission
-        if knowledge_base.created_by != user_id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Not authorized to delete this knowledge base"
-            )
-        
-        await knowledge_base.delete()
-        logger.info(f"Knowledge base deleted: {kb_id} by user {user_id}")
-        return True
-
-    async def list_user_knowledge_bases(
+        return await self.repository.update(knowledge_base)
+    
+    async def delete_knowledge_base(
         self, 
-        user_id: str, 
-        skip: int = 0, 
-        limit: int = 10
+        id: PydanticObjectId, 
+        tenant_id: str
+    ) -> bool:
+        """删除知识库"""
+        knowledge_base = await self.repository.get_by_id_and_tenant(id, tenant_id)
+        if knowledge_base:
+            return await self.repository.delete(knowledge_base)
+        return False
+    
+    async def change_status(
+        self,
+        id: PydanticObjectId,
+        tenant_id: str,
+        status: KnowledgeBaseStatusEnum
+    ) -> Optional[KnowledgeBase]:
+        """更改知识库状态"""
+        knowledge_base = await self.repository.get_by_id_and_tenant(id, tenant_id)
+        if knowledge_base:
+            return await self.repository.update_status(id, status)
+        return None
+    
+    async def add_knowledge_item(
+        self,
+        id: PydanticObjectId,
+        tenant_id: str,
+        item_key: str,
+        item_data: Dict[str, Any]
+    ) -> Optional[KnowledgeBase]:
+        """添加知识条目"""
+        knowledge_base = await self.repository.get_by_id_and_tenant(id, tenant_id)
+        if knowledge_base:
+            return await self.repository.add_item(id, item_key, item_data)
+        return None
+    
+    async def remove_knowledge_item(
+        self,
+        id: PydanticObjectId,
+        tenant_id: str,
+        item_key: str
+    ) -> Optional[KnowledgeBase]:
+        """移除知识条目"""
+        knowledge_base = await self.repository.get_by_id_and_tenant(id, tenant_id)
+        if knowledge_base:
+            return await self.repository.remove_item(id, item_key)
+        return None
+    
+    async def search_knowledge_bases(
+        self,
+        tenant_id: str,
+        query: str,
+        skip: int = 0,
+        limit: int = 100,
+        status: Optional[KnowledgeBaseStatusEnum] = None
     ) -> List[KnowledgeBase]:
-        """List knowledge bases created by a user"""
-        return await KnowledgeBase.find(
-            KnowledgeBase.created_by == user_id
-        ).skip(skip).limit(limit).to_list()
-
-    async def list_public_knowledge_bases(
-        self, 
-        skip: int = 0, 
-        limit: int = 10
-    ) -> List[KnowledgeBase]:
-        """List public knowledge bases"""
-        return await KnowledgeBase.find(
-            KnowledgeBase.is_public == True
-        ).skip(skip).limit(limit).to_list()
-
-    async def get_knowledge_base_items(
-        self, 
-        kb_id: str, 
-        skip: int = 0, 
-        limit: int = 10
-    ) -> List[KnowledgeItem]:
-        """Get knowledge items in a knowledge base"""
-        return await KnowledgeItem.find(
-            KnowledgeItem.knowledge_base_ids == kb_id
-        ).skip(skip).limit(limit).to_list()
-
+        """搜索知识库"""
+        return await self.repository.search(tenant_id, query, skip, limit, status)
+    
+    async def count_knowledge_bases(self, tenant_id: str) -> int:
+        """统计知识库数量"""
+        return await self.repository.count_by_tenant(tenant_id)
+    
+    async def has_access(
+        self,
+        knowledge_base: KnowledgeBase,
+        user_id: str,
+        user_roles: List[str]
+    ) -> bool:
+        """检查用户是否有访问权限"""
+        return knowledge_base.has_access(user_id, user_roles)
+    
 knowledge_base_service = KnowledgeBaseService()

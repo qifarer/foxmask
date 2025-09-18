@@ -17,30 +17,35 @@ from foxmask.core.mongo import  connect_to_mongo, close_mongo_connection, mongod
 from foxmask.core.kafka import kafka_manager
 from foxmask.core.scheduler import scheduler
 from foxmask.core.logger import logger, setup_logger
-from foxmask.core.message.consumers import task_consumer
-from foxmask.core.message.dead_letter_processor import dead_letter_processor
+from foxmask.task.message.consumers import task_consumer
+from foxmask.task.message.dead_letter_processor import dead_letter_processor
 from foxmask.core.middleware.error_handler import ErrorHandlerMiddleware, RateLimitMiddleware
 from foxmask.core.monitoring import monitoring_service
 
 # Import routers
 from foxmask.auth.router import router as auth_router
-from foxmask.file.api.router import router as file_router
-from foxmask.knowledge.router import router as knowledge_router
-from foxmask.tag.router import router as tag_router
-from foxmask.task.router import router as task_router
+#from foxmask.file.api.router import router as file_router
+#from foxmask.knowledge.router import router as knowledge_router
+#from foxmask.tag.router import router as tag_router
+#from foxmask.task.router import router as task_router
 
 # Import GraphQL schemas
 from foxmask.file.graphql import FileQuery, FileMutation
-from foxmask.knowledge.graphql import KnowledgeQuery, KnowledgeMutation
+from foxmask.knowledge.graphql import (
+    KnowledgeBaseQuery,KnowledgeItemQuery,
+    KnowledgeItemMutation,KnowledgeBaseMutation
+)
+
 from foxmask.tag.graphql import TagQuery, TagMutation
 from foxmask.task.graphql import TaskQuery, TaskMutation
 from foxmask.file.mongo import init_file_db
+from foxmask.knowledge.mongo import init_knowledge_db_with_client
 
 # Import utils clients
 from foxmask.utils.weaviate_client import weaviate_client
 from foxmask.utils.neo4j_client import neo4j_client
 from foxmask.utils.minio_client import minio_client
-from foxmask.core.message.kafka_topic import setup_kafka_topics
+from foxmask.task.message.kafka_topic import setup_kafka_topics
 from foxmask.shared.dependencies import get_context
 
 @asynccontextmanager
@@ -50,6 +55,7 @@ async def lifespan(app: FastAPI):
     # Startup
     await connect_to_mongo()
     await init_file_db()
+    await init_knowledge_db_with_client(mongodb.client)
     
     # 设置所需Topic
     await setup_kafka_topics()
@@ -108,10 +114,10 @@ app.add_middleware(
 
 # Include REST API routers
 app.include_router(auth_router, prefix="/api/auth")
-app.include_router(file_router, prefix="/api")
-app.include_router(knowledge_router, prefix="/api")
-app.include_router(tag_router, prefix="/api")
-app.include_router(task_router, prefix="/api")
+# app.include_router(file_router, prefix="/api")
+# app.include_router(knowledge_router, prefix="/api")
+# app.include_router(tag_router, prefix="/api")
+# app.include_router(task_router, prefix="/api")
 
 # Create GraphQL schema by combining all queries and mutations
 
@@ -119,18 +125,16 @@ app.include_router(task_router, prefix="/api")
 @strawberry.type
 class Query(
     FileQuery,
-    KnowledgeQuery,
-    TagQuery,
-    TaskQuery
+    KnowledgeItemQuery,
+    KnowledgeBaseQuery,
 ):
     pass
 
 @strawberry.type
 class Mutation(
     FileMutation,
-    KnowledgeMutation,
-    TagMutation,
-    TaskMutation
+    KnowledgeItemMutation,
+    KnowledgeBaseMutation,
 ):
     pass
 schema = strawberry.Schema(query=Query, mutation=Mutation)

@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
-# backend/foxmask/file/models.py   
-# Copyright (C) 2024 FoxMask Inc.
+# foxmask/file/models.py   
+# Copyright (C) 2025 FoxMask Inc.
 # author: Roky
 
 # 标准库导入
@@ -88,7 +88,7 @@ FILE_TYPE_EXTENSIONS = {
     FileType.SPREADSHEET: ['.xls', '.xlsx', '.ods', '.csv', '.xlsm'],
     FileType.PRESENTATION: ['.ppt', '.pptx', '.odp', '.pptm'],
     FileType.TEXT: ['.txt', '.md', '.markdown', '.log'],
-    FileType.CODE: ['.py', '.js', '.java', '.cpp', '.c', '.h', '.html', '.css', '.php', '.rb', '.go', '.ts'],
+    FileType.CODE: ['.sql','.py', '.js', '.java', '.cpp', '.c', '.h', '.html', '.css', '.php', '.rb', '.go', '.ts'],
     FileType.IMAGE: ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.tiff'],
     FileType.VECTOR: ['.svg', '.ai', '.eps'],
     FileType.AUDIO: ['.mp3', '.wav', '.ogg', '.flac', '.aac', '.wma'],
@@ -308,7 +308,6 @@ class File(Document):
     文件模型
     管理文件的元数据、状态和访问控制信息
     """
-    
     # 主标识字段
     filename: str = Field(..., min_length=1, max_length=255, description="原始文件名")
     
@@ -385,7 +384,7 @@ class File(Document):
     class Settings:
         """MongoDB集合配置"""
         name = "files"
-        
+        use_state_management = True  # Beanie 2.0 状态管理
         # 索引配置
         indexes = [
             # 单字段索引（用于经常查询的字段）
@@ -435,6 +434,16 @@ class File(Document):
         if len(parts) > 2 and parts[-2].lower() == 'tar':
             return 'tar.gz'
         return parts[-1].lower()
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'File':
+        """从字典创建User实例"""
+        return cls(**data)
+    
+    @classmethod
+    def to_dict(self, exclude_none: bool = True, **kwargs) -> Dict[str, Any]:
+        """将User实例转换为字典"""
+        return self.model_dump(exclude_none=exclude_none, **kwargs)
 
     @model_validator(mode='after')
     def determine_file_type(self) -> 'File':

@@ -1,11 +1,11 @@
-from beanie import Document
+# foxmask/knowledge/models/knowledge_item.py
+from foxmask.core.model import BaseModel
 from pydantic import Field
-from typing import Optional, List, Dict
-from datetime import datetime
+from typing import  Dict, Any, Optional
 from enum import Enum
-from foxmask.utils.helpers import get_current_time
+from pymongo import IndexModel, ASCENDING
 
-class KnowledgeItemStatus(str, Enum):
+class KnowledgeItemStatusEnum(str, Enum):
     PENDING = "pending"
     CREATED = "created"
     PARSING = "parsing"
@@ -16,7 +16,7 @@ class KnowledgeItemStatus(str, Enum):
     COMPLETED = "completed"
     FAILED = "failed"
 
-class KnowledgeItemType(str, Enum):
+class KnowledgeItemTypeEnum(str, Enum):
     FILE = "file"
     WEBPAGE = "webpage"
     API = "api"
@@ -25,75 +25,77 @@ class KnowledgeItemType(str, Enum):
     BRAND = "brand"
     CUSTOM = "custom"
 
-class KnowledgeItem(Document):
-    title: str = Field(..., description="Knowledge item title")
-    description: Optional[str] = Field(None, description="Description")
-    type: KnowledgeItemType = Field(..., description="Knowledge item type")
-    status: KnowledgeItemStatus = Field(KnowledgeItemStatus.CREATED, description="Processing status")
-    
-    # Source information
-    source_urls: List[str] = Field(default_factory=list, description="Source URLs")
-    file_ids: List[str] = Field(default_factory=list, description="Related file IDs")
-    
-    # Processed data
-    parsed_content: Optional[Dict] = Field(None, description="Parsed content (MD/JSON)")
-    vector_id: Optional[str] = Field(None, description="Weaviate vector ID")
-    graph_id: Optional[str] = Field(None, description="Neo4j graph node ID")
-    
-    # Metadata
-    tags: List[str] = Field(default_factory=list, description="Tags")
-    knowledge_base_ids: List[str] = Field(default_factory=list, description="Knowledge base IDs")
-    category: Optional[str] = Field(None, description="Category")
-    
-    created_at: datetime = Field(default_factory=get_current_time, description="Creation timestamp")
-    updated_at: datetime = Field(default_factory=get_current_time, description="Last update timestamp")
-    created_by: str = Field(..., description="Creator user ID")
-    
+class ItemContentTypeEnum(str, Enum):
+    SOURCE = "source"
+    PARSED = "parsed"
+    VECTOR = "vector"
+    GRAPH = "graph"
+
+class KnowledgeItemContent(BaseModel):
+    """知识条目内容模型"""
+    item_id: str = Field(..., description="关联的知识条目ID")
+    content_type: ItemContentTypeEnum = Field(..., description="内容类型")
+    content_data: Dict[str, Any] = Field(default_factory=dict, description="内容元数据")
+    # 处理状态信息
+    processing_metadata: Optional[Dict[str, Any]] = Field(
+        default_factory=dict, 
+        description="处理过程元数据"
+    )
+    error_info: Optional[Dict[str, Any]] = Field(
+        None, 
+        description="错误信息"
+    )
+    # 版本控制
+    version: int = Field(1, description="内容版本")
+    is_latest: bool = Field(True, description="是否为最新版本")
+
     class Settings:
-        name = "knowledge_items"
-        indexes = [
-            "type",
-            "status",
-            "tags",
-            "knowledge_base_ids",
-            "created_by",
-            "created_at",
+        name = "knowledge_item_contents"
+        indexes = BaseModel.Settings.indexes + [
+            IndexModel([("item_id", ASCENDING), ("content_type", ASCENDING)]),
+            IndexModel([("item_id", ASCENDING), ("content_type", ASCENDING), ("is_latest", ASCENDING)]),
+            IndexModel([("content_type", ASCENDING)]),
         ]
     
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "title": "Introduction to AI",
-                "description": "A comprehensive guide to artificial intelligence",
-                "type": "file",
-                "status": "completed",
-                "source_urls": ["https://example.com/ai-guide.pdf"],
-                "file_ids": ["file123"],
-                "parsed_content": {"content": "Markdown content here..."},
-                "vector_id": "vector123",
-                "graph_id": "node123",
-                "tags": ["ai", "machine learning", "guide"],
-                "knowledge_base_ids": ["kb123"],
-                "category": "Technology",
-                "created_at": "2023-01-01T00:00:00Z",
-                "updated_at": "2023-01-01T00:00:00Z",
-                "created_by": "user123"
-            }
-        }
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'KnowledgeItemContent':
+        """从字典创建User实例"""
+        return cls(**data)
     
-    def update_status(self, status: KnowledgeItemStatus):
-        """Update knowledge item status"""
-        self.status = status
-        self.updated_at = get_current_time()
+    @classmethod
+    def to_dict(self, exclude_none: bool = True, **kwargs) -> Dict[str, Any]:
+        """将User实例转换为字典"""
+        return self.model_dump(exclude_none=exclude_none, **kwargs)
+
+class KnowledgeItem(BaseModel):
+    """知识条目模型"""
+    item_type: KnowledgeItemTypeEnum = Field(..., description="知识条目类型")
+    status: KnowledgeItemStatusEnum = Field(KnowledgeItemStatusEnum.CREATED, description="处理状态")
+    content: Dict[str, Any] = Field(default_factory=dict, description="内容数据")
+    # 处理状态信息
+    processing_metadata: Dict[str, Any] = Field(
+        default_factory=dict, 
+        description="处理过程元数据"
+    )
+    error_info: Optional[Dict[str, Any]] = Field(
+        None, 
+        description="错误信息"
+    )
+    class Settings:
+        name = "knowledge_items"
+        indexes = BaseModel.Settings.indexes + [
+            IndexModel([("item_type", ASCENDING), ("status", ASCENDING)]),
+            IndexModel([("item_type", ASCENDING)]),
+            IndexModel([("status", ASCENDING)]),
+        ]
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'KnowledgeItem':
+        """从字典创建User实例"""
+        return cls(**data)
     
-    def add_to_knowledge_base(self, knowledge_base_id: str):
-        """Add knowledge item to a knowledge base"""
-        if knowledge_base_id not in self.knowledge_base_ids:
-            self.knowledge_base_ids.append(knowledge_base_id)
-            self.updated_at = get_current_time()
+    @classmethod
+    def to_dict(self, exclude_none: bool = True, **kwargs) -> Dict[str, Any]:
+        """将User实例转换为字典"""
+        return self.model_dump(exclude_none=exclude_none, **kwargs)
     
-    def remove_from_knowledge_base(self, knowledge_base_id: str):
-        """Remove knowledge item from a knowledge base"""
-        if knowledge_base_id in self.knowledge_base_ids:
-            self.knowledge_base_ids.remove(knowledge_base_id)
-            self.updated_at = get_current_time()

@@ -92,15 +92,37 @@ class MinIOClient:
             logger.error(f"Unexpected upload error: {e}")
             return False
 
-    def download_file(self, object_name: str) -> Optional[bytes]:
-        """Download file from MinIO"""
+    async def download_file(self, bucket_name: str, object_name: str, file_path: str) -> bool:
+        """从MinIO下载文件到本地路径"""
         try:
-            response = self.client.get_object(self.bucket_name, object_name)
+            # 使用fget_object下载文件
+            self.client.fget_object(bucket_name, object_name, file_path)
+            
+            logger.info(f"File downloaded successfully: {bucket_name}/{object_name} -> {file_path}")
+            return True
+            
+        except S3Error as e:
+            logger.error(f"MinIO download error: {e}")
+            return False
+        except Exception as e:
+            logger.error(f"Unexpected download error: {e}")
+            return False
+    
+    async def download_file_as_bytes(self, object_name: str, bucket_name: str = None) -> Optional[bytes]:
+        """下载文件并返回字节数据"""
+        if bucket_name is None:
+            bucket_name = self.bucket_name
+        
+        try:
+            # 使用get_object获取文件数据
+            response = self.client.get_object(bucket_name, object_name)
             file_data = response.read()
+            
+            # 正确关闭响应
             response.close()
             response.release_conn()
             
-            logger.info(f"File downloaded successfully: {object_name}")
+            logger.info(f"File downloaded as bytes successfully: {bucket_name}/{object_name}")
             return file_data
             
         except S3Error as e:
@@ -113,12 +135,16 @@ class MinIOClient:
     def get_presigned_url(
         self, 
         object_name: str, 
+        bucket_name: str = None,
         expires: timedelta = timedelta(hours=1)
     ) -> Optional[str]:
         """Generate presigned URL for file access"""
         try:
+            if bucket_name is None:
+                bucket_name = self.bucket_name
+                
             url = self.client.presigned_get_object(
-                self.bucket_name,
+                bucket_name,
                 object_name,
                 expires=expires
             )

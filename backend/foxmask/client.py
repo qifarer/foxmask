@@ -407,26 +407,32 @@ async def main():
     # Test file path
     # filename = "/Users/luoqi/Downloads/products_export_2.zip"
     # filename = "/Users/luoqi/Downloads/AI-A2A.drawio.png"
-    filename = "/Users/luoqi/Downloads/普通高中教科书·数学必修 第一册.pdf"
+    # filename = "/Users/luoqi/Downloads/普通高中教科书·数学必修 第一册.pdf"
     # filename = "/Users/luoqi/Downloads/sp_salebill_21.sql"
+    filenames = ['/Users/luoqi/Downloads/购物顾问智能体落地分析报告.pdf',
+                 '/Users/luoqi/Downloads/购物顾问智能体落地分析报告.md',
+                 '/Users/luoqi/Downloads/sp_salebill_21.sql',
+                 '/Users/luoqi/Downloads/AI-A2A.drawio.png',
+                 '/Users/luoqi/Downloads/products_export_2.zip']
     try:
-        result = await client.upload_file(
-            filename,
-            {
-                "description": "Large file upload example",
-                "tags": ["example", "large-file"],
-                "visibility": "PRIVATE",
-                "content_type": "application/csv",
-                "chunk_size": 5 * 1024 * 1024,  # 5MB chunks
-                "metadata": {
-                    "source": "graphql-client",
-                    "category": "document"
+        for filename in filenames:
+            result = await client.upload_file(
+                filename,
+                {
+                    "description": "Large file upload example",
+                    "tags": ["example", "large-file"],
+                    "visibility": "PRIVATE",
+                    "content_type": "application/csv",
+                    "chunk_size": 5 * 1024 * 1024,  # 5MB chunks
+                    "metadata": {
+                        "source": "graphql-client",
+                        "category": "document"
+                    }
                 }
-            }
-        )
-        print(f"File uploaded successfully: {result}")
-        print(f"KAFKA TOPICS:{str(await kafka_manager.list_topics())}")
-        print(f"KAFKA PARTITIONS:{str(await kafka_manager.get_topic_info('CREATE_KNOWLEDGE_ITEM'))}"   )
+            )
+            print(f"File uploaded successfully: {result}")
+            print(f"KAFKA TOPICS:{str(await kafka_manager.list_topics())}")
+            print(f"KAFKA PARTITIONS:{str(await kafka_manager.get_topic_info('CREATE_KNOWLEDGE_ITEM'))}"   )
     except Exception as e:
         print(f"Upload failed: {e}")
         import traceback

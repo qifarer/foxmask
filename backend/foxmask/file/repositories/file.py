@@ -73,9 +73,35 @@ class FileRepository:
             Optional[File]: 文件对象或None
         """
         try:
-            return await File.find_one(File.file_id == file_id)
+             # 方法1：使用字典查询（最可靠）
+            # file = await File.find_one({"_id": file_id})
+            #return file
+            from bson import ObjectId
+        
+            # 验证并转换 ObjectId
+            if not ObjectId.is_valid(file_id):
+                logger.warning(f"❌ Invalid ObjectId format: {file_id}")
+                return None
+            
+            obj_id = ObjectId(file_id)
+            
+            # 方法1：使用字典查询
+            file = await File.find_one({"_id": obj_id})
+            
+            # 方法2：使用 Beanie 查询语法
+            # file = await File.find_one(File.id == obj_id)
+            
+            return file
+
+            # Beanie 2.0 使用新的查询语法
+            # return await File.find_one(File.id == file_id)
+        except ValueError as e:
+            # 处理无效的 file_id 格式（如不是有效的 ObjectId）
+            logger.warning(f"Invalid file_id format: {file_id}, error: {e}")
+            raise
         except Exception as e:
             logger.error(f"Error getting file by file_id {file_id}: {e}")
+            # 根据业务需求决定是返回 None 还是抛出异常
             raise
     
     async def save_file(self, file: File) -> File:
