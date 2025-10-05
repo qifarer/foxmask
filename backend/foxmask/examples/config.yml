@@ -1,0 +1,20 @@
+general:
+  max_workers: 4
+  temp_dir: ./temp_pdf_content
+  log_level: INFO
+ocr:
+  lang: ch
+  use_gpu: False
+  use_angle_cls: True
+processing:
+  dpi: 150
+  min_table_area: 5000
+  min_formula_area: 100
+output:
+  include_formulas: True
+  include_tables: True
+  include_images: True
+  include_text: True
+mathpix:
+  app_id: "your_mathpix_app_id"
+  app_key: "your_mathpix_app_key"

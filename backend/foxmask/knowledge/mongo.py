@@ -12,7 +12,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 # 本地模块导入
 from foxmask.core.config import settings
 from foxmask.core.logger import logger
-from .models.knowledge_item import KnowledgeItem, KnowledgeItemContent
+from .models.knowledge_item import KnowledgeItem, KnowledgeItemInfo, KnowledgeItemChunk
 from .models.knowledge_base import KnowledgeBase
 
 
@@ -36,7 +36,11 @@ async def init_knowledge_db() -> None:
         # 初始化Beanie ODM
         await init_beanie(
             database=database,
-            document_models=[KnowledgeItem, KnowledgeBase, KnowledgeItemContent],
+            document_models=[
+                KnowledgeItem, 
+                KnowledgeItemInfo,
+                KnowledgeItemChunk,
+                KnowledgeBase],
         )
         
         logger.info("Knowledge database initialized successfully")
@@ -58,14 +62,16 @@ async def cleanup_conflicting_indexes(database) -> None:
     """
     try:
         # 清理知识项集合的冲突索引
-        knowledge_item_collection = database["knowledge_items"]
         knowledge_base_collection = database["knowledge_bases"]
-        knowledge_content_collection = database["knowledge_item_contents"]
+        knowledge_item_collection = database["knowledge_items"]
+        knowledge_info_collection = database["knowledge_item_infos"]
+        knowledge_chunk_collection = database["knowledge_item_chunks"]
         
         collections_to_clean = [
-            ("knowledge_items", knowledge_item_collection),
             ("knowledge_bases", knowledge_base_collection),
-            ("knowledge_item_contents", knowledge_content_collection)
+            ("knowledge_items", knowledge_item_collection),
+            ("knowledge_item_infos", knowledge_info_collection),
+            ("knowledge_item_chunks",knowledge_chunk_collection)
         ]
         
         total_indexes_removed = 0
@@ -98,19 +104,26 @@ async def cleanup_conflicting_indexes(database) -> None:
                     
                     elif collection_name == "knowledge_bases":
                         # 删除可能与 KnowledgeBase 模型冲突的索引
-                        if any(field in index_key for field in ["tenant_id", "visibility", "owner_id"]):
+                        if any(field in index_key for field in ["tenant_id", "visibility"]):
                             if not index_name.startswith("knowledge_bases_"):
                                 logger.info(f"Removing conflicting index from knowledge_bases: {index_name}")
                                 await collection.drop_index(index_name)
                                 indexes_removed += 1
                     
-                    elif collection_name == "knowledge_item_contents":
+                    elif collection_name == "knowledge_item_infos":
                         # 删除可能与 KnowledgeItemContent 模型冲突的索引
-                        if any(field in index_key for field in ["item_id", "content_type", "tenant_id"]):
-                            if not index_name.startswith("knowledge_item_contents_"):
-                                logger.info(f"Removing conflicting index from knowledge_item_contents: {index_name}")
+                        if any(field in index_key for field in ["master_id", "tenant_id"]):
+                            if not index_name.startswith("knowledge_item_infos_"):
+                                logger.info(f"Removing conflicting index from knowledge_item_infos: {index_name}")
                                 await collection.drop_index(index_name)
                                 indexes_removed += 1
+                    elif collection_name == "knowledge_item_chunks":
+                        # 删除可能与 KnowledgeItemContent 模型冲突的索引
+                        if any(field in index_key for field in ["master_id", "tenant_id"]):
+                            if not index_name.startswith("knowledge_item_infos_"):
+                                logger.info(f"Removing conflicting index from knowledge_item_chunks: {index_name}")
+                                await collection.drop_index(index_name)
+                                indexes_removed += 1            
                 
                 total_indexes_removed += indexes_removed
                 if indexes_removed > 0:
@@ -147,7 +160,7 @@ async def init_knowledge_db_with_client(client: AsyncIOMotorClient, db_name: str
         # 初始化Beanie ODM
         await init_beanie(
             database=database,
-            document_models=[KnowledgeItem, KnowledgeBase, KnowledgeItemContent],
+            document_models=[KnowledgeBase, KnowledgeItem, KnowledgeItemInfo,KnowledgeItemChunk],
         )
         
         logger.info("Knowledge database initialized successfully with existing client")

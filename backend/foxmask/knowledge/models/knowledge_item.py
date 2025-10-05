@@ -1,20 +1,8 @@
-# foxmask/knowledge/models/knowledge_item.py
-from foxmask.core.model import BaseModel
+from foxmask.core.model import MasterBaseModel, SlaveBaseModel
 from pydantic import Field
-from typing import  Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from enum import Enum
-from pymongo import IndexModel, ASCENDING
-
-class KnowledgeItemStatusEnum(str, Enum):
-    PENDING = "pending"
-    CREATED = "created"
-    PARSING = "parsing"
-    PARSED = "parsed"
-    VECTORIZING = "vectorizing"
-    VECTORIZED = "vectorized"
-    GRAPHING = "graphing"
-    COMPLETED = "completed"
-    FAILED = "failed"
+from pymongo import IndexModel, ASCENDING, DESCENDING
 
 class KnowledgeItemTypeEnum(str, Enum):
     FILE = "file"
@@ -25,77 +13,102 @@ class KnowledgeItemTypeEnum(str, Enum):
     BRAND = "brand"
     CUSTOM = "custom"
 
-class ItemContentTypeEnum(str, Enum):
-    SOURCE = "source"
-    PARSED = "parsed"
-    VECTOR = "vector"
-    GRAPH = "graph"
+class ItemChunkTypeEnum(str, Enum):
+    TEXT = "text"
+    IMAGE = "image"
+    TABLE = "table"
+    EQUATION = "equation"
 
-class KnowledgeItemContent(BaseModel):
-    """知识条目内容模型"""
-    item_id: str = Field(..., description="关联的知识条目ID")
-    content_type: ItemContentTypeEnum = Field(..., description="内容类型")
-    content_data: Dict[str, Any] = Field(default_factory=dict, description="内容元数据")
-    # 处理状态信息
-    processing_metadata: Optional[Dict[str, Any]] = Field(
-        default_factory=dict, 
-        description="处理过程元数据"
-    )
-    error_info: Optional[Dict[str, Any]] = Field(
-        None, 
-        description="错误信息"
-    )
-    # 版本控制
-    version: int = Field(1, description="内容版本")
-    is_latest: bool = Field(True, description="是否为最新版本")
-
-    class Settings:
-        name = "knowledge_item_contents"
-        indexes = BaseModel.Settings.indexes + [
-            IndexModel([("item_id", ASCENDING), ("content_type", ASCENDING)]),
-            IndexModel([("item_id", ASCENDING), ("content_type", ASCENDING), ("is_latest", ASCENDING)]),
-            IndexModel([("content_type", ASCENDING)]),
-        ]
-    
-    @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'KnowledgeItemContent':
-        """从字典创建User实例"""
-        return cls(**data)
-    
-    @classmethod
-    def to_dict(self, exclude_none: bool = True, **kwargs) -> Dict[str, Any]:
-        """将User实例转换为字典"""
-        return self.model_dump(exclude_none=exclude_none, **kwargs)
-
-class KnowledgeItem(BaseModel):
-    """知识条目模型"""
+class KnowledgeItem(MasterBaseModel):
+    """
+    知识条目模型
+    修复了索引继承和方法实现问题
+    """
+    # 核心业务字段
     item_type: KnowledgeItemTypeEnum = Field(..., description="知识条目类型")
-    status: KnowledgeItemStatusEnum = Field(KnowledgeItemStatusEnum.CREATED, description="处理状态")
-    content: Dict[str, Any] = Field(default_factory=dict, description="内容数据")
-    # 处理状态信息
-    processing_metadata: Dict[str, Any] = Field(
-        default_factory=dict, 
-        description="处理过程元数据"
-    )
-    error_info: Optional[Dict[str, Any]] = Field(
-        None, 
-        description="错误信息"
-    )
+    # 源信息
+    source_id: Optional[str] = Field(None, description="源ID")
+    
     class Settings:
         name = "knowledge_items"
-        indexes = BaseModel.Settings.indexes + [
+        indexes = [
+            IndexModel([("tenant_id", ASCENDING), ("item_type", ASCENDING)]),
+            IndexModel([("tenant_id", ASCENDING), ("status", ASCENDING)]),
             IndexModel([("item_type", ASCENDING), ("status", ASCENDING)]),
-            IndexModel([("item_type", ASCENDING)]),
-            IndexModel([("status", ASCENDING)]),
+            IndexModel([("created_at", DESCENDING)]),
+            IndexModel([("status", ASCENDING), ("created_at", DESCENDING)]),
         ]
 
-    @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'KnowledgeItem':
-        """从字典创建User实例"""
-        return cls(**data)
+class KnowledgeItemInfo(SlaveBaseModel):
+    """
+    知识条目详细信息模型
+    修复了索引继承问题
+    """
+    page_idx: int = Field(..., ge=0, description="页码索引")
+    page_size: List[int] = Field(
+        default_factory=List, 
+        description="页面尺寸信息"
+    )
+    preproc_blocks: List[Dict[str, Any]] = Field(
+        default_factory=list, 
+        description="预处理块列表"
+    )
+    para_blocks: List[Dict[str, Any]] = Field(
+        default_factory=list, 
+        description="段落块列表"
+    )
+    discarded_blocks: List[Dict[str, Any]] = Field(
+        default_factory=list, 
+        description="丢弃块列表"
+    )
     
-    @classmethod
-    def to_dict(self, exclude_none: bool = True, **kwargs) -> Dict[str, Any]:
-        """将User实例转换为字典"""
-        return self.model_dump(exclude_none=exclude_none, **kwargs)
+    class Settings:
+        name = "knowledge_item_infos"
+        indexes = [
+            IndexModel([("tenant_id", ASCENDING), ("master_id", ASCENDING)]),
+            IndexModel([("master_id", ASCENDING), ("page_idx", ASCENDING)], unique=True),
+            IndexModel([("master_id", ASCENDING)]),
+        ]
+
+class KnowledgeItemChunk(SlaveBaseModel):
+    """
+    知识条目内容块模型
+    修复了字段类型和方法实现问题
+    """
+    page_idx: int = Field(..., ge=0, description="页码索引")
+    chunk_idx: int = Field(..., ge=0, description="块索引")
+    chunk_type: str = Field(..., description="块类型")
+    # 内容字段（根据类型选择）
+    text: Optional[str] = Field(None, description="文本内容")
+    image_url: Optional[str] = Field(None, description="图片URL")
+    image_data: Optional[str] = Field(None, description="图片Base64数据")
+    equation: Optional[str] = Field(None, description="公式内容")
+    table_data: Optional[List[Dict]] = Field(None, description="表格数据")
+    code_content: Optional[str] = Field(None, description="代码内容")
+    code_language: Optional[str] = Field(None, description="编程语言")
     
+    # 块元数据
+    chunk_metadata: Dict[str, Any] = Field(
+        default_factory=dict, 
+        description="块元数据"
+    )
+    position: Dict[str, float] = Field(
+        default_factory=dict, 
+        description="位置信息"
+    )
+    size: Dict[str, float] = Field(
+        default_factory=dict, 
+        description="尺寸信息"
+    )
+    
+    # 向量化信息
+    vector_id: Optional[str] = Field(None, description="向量ID")
+   
+    class Settings:
+        name = "knowledge_item_chunks"
+        indexes = [
+            IndexModel([("tenant_id", ASCENDING), ("master_id", ASCENDING)]),
+            IndexModel([("master_id", ASCENDING), ("chunk_idx", ASCENDING)], unique=True),
+            IndexModel([("type", ASCENDING)]),
+            IndexModel([("master_id", ASCENDING), ("type", ASCENDING)]),
+        ]

@@ -8,6 +8,9 @@ from io import BytesIO
 from datetime import timedelta, timezone, datetime
 from foxmask.core.config import settings
 from foxmask.core.logger import logger
+import os
+import mimetypes
+import asyncio
 
 class MinIOClient:
     def __init__(self):
@@ -49,14 +52,83 @@ class MinIOClient:
             logger.error(f"Error creating bucket: {e}")
             return False
 
+    # 同步方法
+    def put_object(
+        self, 
+        bucket_name: str, 
+        object_name: str, 
+        data: bytes,
+        content_type: str = "application/octet-stream",
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """上传对象到 MinIO - 兼容服务层接口"""
+        try:
+            # 确保桶存在
+            if not self.bucket_exists(bucket_name):
+                self.make_bucket(bucket_name)
+                logger.info(f"Created bucket: {bucket_name}")
+            
+            # 将 bytes 转换为 BytesIO
+            data_stream = BytesIO(data)
+            
+            # 准备额外的 headers
+            headers = {}
+            if content_type:
+                headers["Content-Type"] = content_type
+            if metadata:
+                # 将 metadata 字典转换为 MinIO 的 headers 格式
+                for key, value in metadata.items():
+                    headers[f"X-Amz-Meta-{key}"] = str(value)
+            
+            # 上传对象
+            result = self.client.put_object(
+                bucket_name=bucket_name,
+                object_name=object_name,
+                data=data_stream,
+                length=len(data),
+                content_type=content_type,
+                metadata=metadata
+            )
+            
+            logger.info(f"Successfully uploaded object: {object_name} to bucket: {bucket_name}")
+            
+            return {
+                "success": True,
+                "etag": result.etag,
+                "version_id": getattr(result, 'version_id', None),
+                "bucket": bucket_name,
+                "object": object_name
+            }
+            
+        except S3Error as e:
+            logger.error(f"MinIO upload failed - Bucket: {bucket_name}, Object: {object_name}, Error: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "bucket": bucket_name,
+                "object": object_name
+            }
+        except Exception as e:
+            logger.error(f"Unexpected error during MinIO upload: {e}")
+            return {
+                "success": False,
+                "error": f"Unexpected error: {str(e)}",
+                "bucket": bucket_name,
+                "object": object_name
+            }
+
     def upload_file(
         self, 
         object_name: str, 
         file_data: Union[BinaryIO, bytes],
-        content_type: str = "application/octet-stream"
-    ) -> bool:
-        """Upload file to MinIO"""
+        content_type: str = "application/octet-stream",
+        bucket_name: str = None
+    ) -> Dict[str, Any]:
+        """Upload file to MinIO - 返回字典格式"""
         try:
+            if bucket_name is None:
+                bucket_name = self.bucket_name
+                
             # 处理bytes类型数据
             if isinstance(file_data, bytes):
                 file_data = BytesIO(file_data)
@@ -74,8 +146,8 @@ class MinIOClient:
                 length = file_data.tell()
                 file_data.seek(current_pos)  # 恢复位置
             
-            self.client.put_object(
-                self.bucket_name,
+            result = self.client.put_object(
+                bucket_name,
                 object_name,
                 file_data,
                 length=length,
@@ -83,24 +155,95 @@ class MinIOClient:
             )
             
             logger.info(f"File uploaded successfully: {object_name}")
-            return True
+            
+            return {
+                "success": True,
+                "etag": result.etag,
+                "version_id": getattr(result, 'version_id', None),
+                "bucket": bucket_name,
+                "object": object_name
+            }
             
         except S3Error as e:
             logger.error(f"MinIO upload error: {e}")
-            return False
+            return {
+                "success": False,
+                "error": str(e),
+                "bucket": bucket_name,
+                "object": object_name
+            }
         except Exception as e:
             logger.error(f"Unexpected upload error: {e}")
-            return False
+            return {
+                "success": False,
+                "error": f"Unexpected error: {str(e)}",
+                "bucket": bucket_name,
+                "object": object_name
+            }
 
+    # 异步方法包装器
+    async def put_object_async(
+        self, 
+        bucket_name: str, 
+        object_name: str, 
+        data: bytes,
+        content_type: str = "application/octet-stream",
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """异步版本的 put_object - 添加调试"""
+        try:
+            logger.info(f"=== MINIO CLIENT UPLOAD DEBUG ===")
+            logger.info(f"Bucket: {bucket_name}")
+            logger.info(f"Object: {object_name}")
+            logger.info(f"Data size: {len(data)} bytes")
+            logger.info(f"Content type: {content_type}")
+            
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(
+                None, 
+                self.put_object, 
+                bucket_name, object_name, data, content_type, metadata
+            )
+            
+            logger.info(f"MinIO client result: {result}")
+            logger.info(f"=== END CLIENT DEBUG ===")
+            
+            # ✅ 确保返回正确的格式
+            if isinstance(result, dict) and "etag" in result:
+                return result["etag"]
+            else:
+                return "unknown-etag"
+                
+        except Exception as e:
+            logger.error(f"MinIO client upload failed: {e}", exc_info=True)
+            raise
+        
+    async def upload_file_async(
+        self, 
+        object_name: str, 
+        file_data: Union[BinaryIO, bytes],
+        content_type: str = "application/octet-stream",
+        bucket_name: str = None
+    ) -> Dict[str, Any]:
+        """异步版本的 upload_file"""
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None, 
+            self.upload_file, 
+            object_name, file_data, content_type, bucket_name
+        )
+    
     async def download_file(self, bucket_name: str, object_name: str, file_path: str) -> bool:
         """从MinIO下载文件到本地路径"""
         try:
-            # 使用fget_object下载文件
-            self.client.fget_object(bucket_name, object_name, file_path)
-            
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(
+                None, 
+                self.client.fget_object, 
+                bucket_name, object_name, file_path
+            )
             logger.info(f"File downloaded successfully: {bucket_name}/{object_name} -> {file_path}")
             return True
-            
         except S3Error as e:
             logger.error(f"MinIO download error: {e}")
             return False
@@ -114,8 +257,13 @@ class MinIOClient:
             bucket_name = self.bucket_name
         
         try:
-            # 使用get_object获取文件数据
-            response = self.client.get_object(bucket_name, object_name)
+            loop = asyncio.get_event_loop()
+            response = await loop.run_in_executor(
+                None,
+                self.client.get_object,
+                bucket_name, object_name
+            )
+            
             file_data = response.read()
             
             # 正确关闭响应
@@ -131,7 +279,7 @@ class MinIOClient:
         except Exception as e:
             logger.error(f"Unexpected download error: {e}")
             return None
-
+        
     def get_presigned_url(
         self, 
         object_name: str, 
@@ -356,6 +504,74 @@ class MinIOClient:
         except S3Error as e:
             logger.error(f"MinIO upload part presigned URL generation failed: {e}")
             return None
+
+    def upload_directory(self,bucket_name, local_dir, prefix=""):
+        """
+        将 local_dir 下的所有文件递归上传到 bucket，
+        相对路径被用作对象名（并替换为 '/'），
+        prefix 可用于给对象名前加一个前缀路径（可为空）。
+        """
+        uploaded = []
+        local_dir = os.path.abspath(local_dir)
+        for root, dirs, files in os.walk(local_dir):
+            for fname in files:
+                full_path = os.path.join(root, fname)
+                rel_path = os.path.relpath(full_path, local_dir)
+                # 统一用 '/' 作为对象路径分隔符
+                object_name = os.path.join(prefix, rel_path).replace(os.sep, "/").lstrip("/")
+                content_type, _ = mimetypes.guess_type(full_path)
+                if content_type is None:
+                    content_type = "application/octet-stream"
+                try:
+                    self.client.fput_object(bucket_name, object_name, full_path, content_type=content_type)
+                    uploaded.append(object_name)
+                    print(f"Uploaded: {object_name}")
+                except S3Error as e:
+                    print(f"Failed to upload {full_path}: {e}")
+        return uploaded    
+    
+    def get_object(self, bucket_name: str, object_name: str) -> Any:
+        """获取对象 - 同步版本"""
+        try:
+            return self.client.get_object(bucket_name, object_name)
+        except S3Error as e:
+            logger.error(f"MinIO get object failed - Bucket: {bucket_name}, Object: {object_name}, Error: {e}")
+            raise
+    
+    def stat_object(self, bucket_name: str, object_name: str) -> Any:
+        """获取对象状态 - 同步版本"""
+        try:
+            return self.client.stat_object(bucket_name, object_name)
+        except S3Error as e:
+            logger.error(f"MinIO stat object failed - Bucket: {bucket_name}, Object: {object_name}, Error: {e}")
+            raise
+    
+    def remove_object(self, bucket_name: str, object_name: str) -> None:
+        """删除对象 - 同步版本"""
+        try:
+            self.client.remove_object(bucket_name, object_name)
+        except S3Error as e:
+            logger.error(f"MinIO remove object failed - Bucket: {bucket_name}, Object: {object_name}, Error: {e}")
+            raise
+    
+    def copy_object(self, bucket_name: str, object_name: str, copy_source: Any, **kwargs) -> Any:
+        """复制对象 - 同步版本"""
+        try:
+            return self.client.copy_object(bucket_name, object_name, copy_source, **kwargs)
+        except S3Error as e:
+            logger.error(f"MinIO copy object failed - Bucket: {bucket_name}, Object: {object_name}, Error: {e}")
+            raise
+    
+    def CopySource(self, bucket_name: str, object_name: str) -> Any:
+        """创建复制源 - 同步版本"""
+        try:
+            # 根据你的 MinIO 客户端库调整
+            # 对于 minio-py，可能是这样的：
+            from minio.commonconfig import CopySource
+            return CopySource(bucket_name, object_name)
+        except Exception as e:
+            logger.error(f"MinIO CopySource creation failed: {e}")
+            raise
 
 # Global MinIO client instance
 minio_client = MinIOClient()

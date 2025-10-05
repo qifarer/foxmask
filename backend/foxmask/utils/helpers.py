@@ -7,7 +7,9 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 import json
 from bson import ObjectId
-
+import base64
+import re
+from foxmask.core.logger import logger
 
 def generate_uuid() -> str:
     """Generate a UUID string"""
@@ -20,6 +22,13 @@ def generate_short_id() -> str:
 def get_current_time() -> datetime:
     """Get current UTC time"""
     return datetime.now(timezone.utc)
+
+def get_current_timestamp() -> datetime:
+    return datetime.now(timezone.utc)
+
+def get_iso_timestamp() -> str:
+    """获取当前时间的 ISO 格式字符串"""
+    return datetime.now(timezone.utc).isoformat()
 
 def format_timestamp(timestamp: datetime) -> str:
     """Format datetime to ISO string"""
@@ -110,3 +119,94 @@ def sanitize_filename(filename: str) -> str:
 def generate_presigned_url_expiry(minutes: int = 60) -> int:
     """Generate expiry time for presigned URLs"""
     return int((get_current_time().timestamp() + minutes * 60))
+
+
+def is_valid_base64(data: str) -> bool:
+    """检查字符串是否是有效的 base64 编码"""
+    try:
+        # 移除可能的 data URL 前缀
+        if data.startswith('data:'):
+            match = re.match(r'data:[^;]+;base64,(.+)', data)
+            if match:
+                data = match.group(1)
+            else:
+                return False
+        
+        # 移除空白字符
+        data = data.replace('\n', '').replace('\r', '').replace(' ', '')
+        
+        # 检查长度是否是4的倍数
+        if len(data) % 4 != 0:
+            return False
+        
+        # 尝试解码
+        base64.b64decode(data)
+        return True
+    except Exception:
+        return False
+
+def decode_base64_data(data: str) -> Optional[bytes]:
+    """解码 base64 数据"""
+    try:
+        # 处理 data URL
+        if data.startswith('data:'):
+            match = re.match(r'data:[^;]+;base64,(.+)', data)
+            if match:
+                data = match.group(1)
+            else:
+                return None
+        
+        # 移除空白字符
+        data = data.replace('\n', '').replace('\r', '').replace(' ', '')
+        
+        return base64.b64decode(data)
+    except Exception as e:
+        logger.error(f"Base64 decoding failed: {e}")
+        return None
+    
+def convert_upload_to_string(upload_obj) -> str:
+    """将 Upload 对象转换为 base64 字符串"""
+    try:
+        logger.info(f"Converting Upload object to base64: {type(upload_obj)}")
+        
+        # 方法1：如果 upload_obj 有 file 属性（Strawberry 标准）
+        if hasattr(upload_obj, 'file'):
+            file_obj = upload_obj.file
+            logger.info(f"Upload has file attribute: {type(file_obj)}")
+            
+            # 读取文件内容
+            file_content = file_obj.read()
+            logger.info(f"Read file content: {len(file_content)} bytes")
+            
+            # 编码为 base64
+            import base64
+            base64_data = base64.b64encode(file_content).decode('utf-8')
+            logger.info(f"Encoded to base64: {len(base64_data)} characters")
+            
+            return base64_data
+        
+        # 方法2：如果 upload_obj 本身就是文件类对象
+        elif hasattr(upload_obj, 'read'):
+            logger.info("Upload is file-like object")
+            file_content = upload_obj.read()
+            logger.info(f"Read file content: {len(file_content)} bytes")
+            
+            import base64
+            base64_data = base64.b64encode(file_content).decode('utf-8')
+            logger.info(f"Encoded to base64: {len(base64_data)} characters")
+            
+            return base64_data
+        
+        # 方法3：如果已经是字符串（可能是测试数据）
+        elif isinstance(upload_obj, str):
+            logger.info("Upload is already string, assuming base64")
+            return upload_obj
+        
+        else:
+            logger.error(f"Unsupported Upload type: {type(upload_obj)}")
+            raise ValueError(f"Unsupported Upload type: {type(upload_obj)}")
+            
+    except Exception as e:
+        logger.error(f"Failed to convert Upload to base64: {e}")
+        raise
+

@@ -1,5 +1,5 @@
 # foxmask/knowledge/models/knowledge_base.py
-from foxmask.core.model import BaseModel
+from foxmask.core.model import MasterBaseModel
 from pydantic import Field
 from typing import Dict, Any, List
 from enum import Enum 
@@ -10,17 +10,15 @@ class KnowledgeBaseStatusEnum(str, Enum):
     ACTIVE = "active"        # 活跃
     ARCHIVE = "archive"      # 归档
    
-class KnowledgeBase(BaseModel):
+class KnowledgeBase(MasterBaseModel):
     """知识库模型"""
-    items: Dict[str, Any] = Field(default_factory=dict, description="知识条目数据，按类型组织")
-    item_count: int = Field(0, description="知识条目总数")
-    status: KnowledgeBaseStatusEnum = Field(
-        KnowledgeBaseStatusEnum.DRAFT, 
-        description="状态"
-    )
+    items: List[Dict[str, Any]] = Field(default_factory=dict, description="知识条目数据，按类型组织")
+       
     class Settings:
         name = "knowledge_bases"
-        indexes = BaseModel.Settings.indexes + [
-            IndexModel([("item_count", DESCENDING)]),
-            IndexModel([("category", ASCENDING)]),
+        indexes = [
+            IndexModel([("tenant_id", ASCENDING), ("status", ASCENDING)]),
+            IndexModel([("item_type", ASCENDING), ("status", ASCENDING)]),
+            IndexModel([("created_at", DESCENDING)]),
+            IndexModel([("status", ASCENDING), ("created_at", DESCENDING)]),
         ]

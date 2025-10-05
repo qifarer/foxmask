@@ -3,10 +3,9 @@ from typing import List, Optional, Dict, Any
 from beanie import PydanticObjectId
 from foxmask.knowledge.models import (
     KnowledgeBase, 
-    KnowledgeBaseStatusEnum
 )
 from foxmask.knowledge.repositories import knowledge_base_repository
-from foxmask.core.model import Visibility
+from foxmask.core.model import Visibility,Status
 from foxmask.utils.helpers import get_current_time
 
 class KnowledgeBaseService:
@@ -42,7 +41,7 @@ class KnowledgeBaseService:
             metadata=metadata or {},
             items={},
             item_count=0,
-            status=KnowledgeBaseStatusEnum.DRAFT
+            status=Status.DRAFT
         )
         
         return await self.repository.create(knowledge_base)
@@ -60,7 +59,7 @@ class KnowledgeBaseService:
         tenant_id: str,
         skip: int = 0,
         limit: int = 100,
-        status: Optional[KnowledgeBaseStatusEnum] = None,
+        status: Optional[Status] = None,
         category: Optional[str] = None
     ) -> List[KnowledgeBase]:
         """列出知识库"""
@@ -74,7 +73,7 @@ class KnowledgeBaseService:
         user_id: str,
         skip: int = 0,
         limit: int = 100,
-        status: Optional[KnowledgeBaseStatusEnum] = None
+        status: Optional[Status] = None
     ) -> List[KnowledgeBase]:
         """列出用户有权限访问的知识库"""
         return await self.repository.list_by_user(
@@ -119,7 +118,7 @@ class KnowledgeBaseService:
         self,
         id: PydanticObjectId,
         tenant_id: str,
-        status: KnowledgeBaseStatusEnum
+        status: Status
     ) -> Optional[KnowledgeBase]:
         """更改知识库状态"""
         knowledge_base = await self.repository.get_by_id_and_tenant(id, tenant_id)
@@ -158,7 +157,7 @@ class KnowledgeBaseService:
         query: str,
         skip: int = 0,
         limit: int = 100,
-        status: Optional[KnowledgeBaseStatusEnum] = None
+        status: Optional[Status] = None
     ) -> List[KnowledgeBase]:
         """搜索知识库"""
         return await self.repository.search(tenant_id, query, skip, limit, status)

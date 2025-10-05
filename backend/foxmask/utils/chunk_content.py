@@ -34,13 +34,13 @@ def chunk_markdown_content(md_content, metadata=None, chunk_size=1000, chunk_ove
         length_function=len,
     )
     
-    # Combine all splits
     final_chunks = []
     for split in header_splits:
         chunks = text_splitter.split_documents([split])
-        final_chunks.extend(chunks)
-    
-    return final_chunks
+        final_chunks.extend([c.page_content for c in chunks])
+
+    indexed_chunks = [{"index": i, "content": chunk} for i, chunk in enumerate(final_chunks, start=1)]
+    return indexed_chunks
 
 # Example usage
 if __name__ == "__main__":

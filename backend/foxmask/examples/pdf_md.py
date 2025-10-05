@@ -1,0 +1,591 @@
+import os
+import fitz  # PyMuPDF
+import cv2
+import numpy as np
+import pandas as pd
+import logging
+import json
+import time
+import uuid
+from datetime import datetime
+from PIL import Image
+from paddleocr import PaddleOCR
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Dict, List, Optional, Tuple, Any, Union
+import argparse
+import yaml
+
+# 配置日志系统
+def setup_logging(log_level: str = "INFO", log_file: Optional[str] = None) -> logging.Logger:
+    """设置日志配置"""
+    logger = logging.getLogger("pdf2md")
+    logger.setLevel(getattr(logging, log_level.upper()))
+    
+    # 清除现有处理器
+    for handler in logger.handlers[:]:
+        logger.removeHandler(handler)
+    
+    # 创建格式化器
+    formatter = logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
+    
+    # 控制台处理器
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(formatter)
+    logger.addHandler(console_handler)
+    
+    # 文件处理器（如果指定了日志文件）
+    if log_file:
+        file_handler = logging.FileHandler(log_file)
+        file_handler.setFormatter(formatter)
+        logger.addHandler(file_handler)
+    
+    return logger
+
+# 配置管理
+class ConfigManager:
+    """配置管理器"""
+    
+    DEFAULT_CONFIG = {
+        "general": {
+            "max_workers": 2,
+            "timeout": 3600,
+            "temp_dir": "./temp_pdf_content",
+            "log_level": "INFO",
+            "log_file": None,
+        },
+        "ocr": {
+            "use_gpu": False,
+            "lang": "ch",
+            "use_angle_cls": True,
+            "use_doc_orientation_classify": False,
+            "use_doc_unwarping": False,
+            "use_textline_orientation": False,
+            "show_log": False,
+        },
+        "processing": {
+            "dpi": 200,
+            "min_table_area": 5000,
+            "min_formula_area": 100,
+            "row_threshold": 20,
+            "max_pages": 500,
+            "skip_pages": [],
+        },
+        "output": {
+            "include_images": True,
+            "include_tables": True,
+            "include_formulas": True,
+            "include_text": True,
+            "page_headers": True,
+            "table_images": True,
+        }
+    }
+    
+    def __init__(self, config_path: Optional[str] = None):
+        self.config = self.DEFAULT_CONFIG.copy()
+        if config_path and os.path.exists(config_path):
+            self.load_config(config_path)
+    
+    def load_config(self, config_path: str):
+        """从YAML文件加载配置"""
+        try:
+            with open(config_path, 'r', encoding='utf-8') as f:
+                loaded_config = yaml.safe_load(f)
+                self._deep_update(self.config, loaded_config)
+        except Exception as e:
+            logging.warning(f"加载配置文件失败: {e}, 使用默认配置")
+    
+    def _deep_update(self, original: Dict, update: Dict) -> None:
+        """深度更新字典"""
+        for key, value in update.items():
+            if key in original and isinstance(original[key], dict) and isinstance(value, dict):
+                self._deep_update(original[key], value)
+            else:
+                original[key] = value
+    
+    def get(self, section: str, key: str, default: Any = None) -> Any:
+        """获取配置值"""
+        try:
+            return self.config.get(section, {}).get(key, default)
+        except Exception as e:
+            logging.warning(f"获取配置值时发生错误: {e}")
+            return default
+
+# 高级PDF转Markdown转换器
+class AdvancedPDFToMarkdownConverter:
+    """高级PDF转Markdown转换器"""
+    
+    def __init__(self, config: ConfigManager, logger: logging.Logger):
+        self.config = config
+        self.logger = logger
+        self.temp_dir = config.get("general", "temp_dir")
+        self.task_id = str(uuid.uuid4())[:8]
+        self.task_temp_dir = os.path.join(self.temp_dir, self.task_id)
+        os.makedirs(self.task_temp_dir, exist_ok=True)
+        
+        # 初始化OCR引擎
+        self.ocr = self._init_ocr()
+        self.table_ocr = self._init_table_ocr()
+        
+        # 性能统计
+        self.stats = {
+            "start_time": time.time(),
+            "pages_processed": 0,
+            "images_extracted": 0,
+            "tables_detected": 0,
+            "formulas_detected": 0,
+            "errors": 0,
+            "pdf_path": "",
+            "output_path": ""
+        }
+    
+    def _init_ocr(self) -> PaddleOCR:
+        """初始化OCR引擎"""
+        try:
+            ocr_config = {
+                "use_angle_cls": self.config.get("ocr", "use_angle_cls", True),
+                "lang": self.config.get("ocr", "lang", "ch"),
+                "use_gpu": self.config.get("ocr", "use_gpu", False),
+                "use_doc_orientation_classify": self.config.get("ocr", "use_doc_orientation_classify", False),
+                "use_doc_unwarping": self.config.get("ocr", "use_doc_unwarping", False),
+                "use_textline_orientation": self.config.get("ocr", "use_textline_orientation", False),
+                "show_log": self.config.get("ocr", "show_log", False)
+            }
+            return PaddleOCR(**ocr_config)
+        except Exception as e:
+            self.logger.error(f"初始化OCR引擎失败: {e}")
+            # 返回默认配置的OCR
+            return PaddleOCR(use_angle_cls=True, lang="ch", use_gpu=False)
+    
+    def _init_table_ocr(self) -> PaddleOCR:
+        """初始化表格OCR引擎"""
+        try:
+            ocr_config = {
+                "use_angle_cls": self.config.get("ocr", "use_angle_cls", True),
+                "lang": self.config.get("ocr", "lang", "ch"),
+                "use_gpu": self.config.get("ocr", "use_gpu", False),
+                "show_log": self.config.get("ocr", "show_log", False)
+            }
+            return PaddleOCR(**ocr_config)
+        except Exception as e:
+            self.logger.error(f"初始化表格OCR引擎失败: {e}")
+            return PaddleOCR(use_angle_cls=True, lang="ch", use_gpu=False)
+    
+    def process_pdf(self, pdf_path: str, output_md_path: str) -> Dict[str, Any]:
+        """
+        处理PDF文件
+        """
+        self.logger.info(f"开始处理PDF: {pdf_path}")
+        self.stats["pdf_path"] = pdf_path
+        self.stats["output_path"] = output_md_path
+        
+        try:
+            # 提取PDF内容
+            elements = self.extract_pdf_content(pdf_path)
+            
+            # 转换为Markdown
+            self.convert_to_markdown(elements, output_md_path)
+            
+            # 计算处理时间
+            self.stats["end_time"] = time.time()
+            self.stats["processing_time"] = self.stats["end_time"] - self.stats["start_time"]
+            
+            self.logger.info(f"PDF处理完成: {pdf_path}")
+            
+            # 创建可序列化的统计信息
+            serializable_stats = self._get_serializable_stats()
+            self.logger.info(f"统计信息: {json.dumps(serializable_stats, indent=2, ensure_ascii=False)}")
+            
+            return serializable_stats
+            
+        except Exception as e:
+            self.logger.error(f"处理PDF时发生错误: {e}")
+            self.stats["errors"] += 1
+            self.stats["error_message"] = str(e)
+            raise
+    
+    def _get_serializable_stats(self) -> Dict[str, Any]:
+        """获取可序列化的统计信息"""
+        return {
+            "task_id": self.task_id,
+            "pdf_path": self.stats["pdf_path"],
+            "output_path": self.stats["output_path"],
+            "pages_processed": self.stats["pages_processed"],
+            "images_extracted": self.stats["images_extracted"],
+            "tables_detected": self.stats["tables_detected"],
+            "formulas_detected": self.stats["formulas_detected"],
+            "errors": self.stats["errors"],
+            "processing_time": round(self.stats.get("processing_time", 0), 2),
+            "start_time": datetime.fromtimestamp(self.stats["start_time"]).isoformat(),
+            "end_time": datetime.fromtimestamp(self.stats.get("end_time", time.time())).isoformat()
+        }
+    
+    def extract_pdf_content(self, pdf_path: str) -> List[Dict]:
+        """提取PDF内容"""
+        self.logger.info("开始提取PDF内容")
+        
+        if not os.path.exists(pdf_path):
+            raise FileNotFoundError(f"PDF文件不存在: {pdf_path}")
+        
+        doc = fitz.open(pdf_path)
+        total_pages = len(doc)
+        max_pages = self.config.get("processing", "max_pages")
+        skip_pages = self.config.get("processing", "skip_pages", [])
+        
+        if max_pages and max_pages < total_pages:
+            total_pages = max_pages
+        
+        elements = []
+        
+        # 使用单线程处理避免并发问题
+        for page_num in range(total_pages):
+            if page_num + 1 not in skip_pages:
+                try:
+                    page_elements = self.process_page(doc, page_num)
+                    elements.extend(page_elements)
+                    self.stats["pages_processed"] += 1
+                    self.logger.info(f"已处理页面 {page_num + 1}/{total_pages}")
+                except Exception as e:
+                    self.logger.error(f"处理页面 {page_num + 1} 时发生错误: {e}")
+                    self.stats["errors"] += 1
+        
+        doc.close()
+        return elements
+    
+    def process_page(self, doc: fitz.Document, page_num: int) -> List[Dict]:
+        """处理单个页面"""
+        page = doc.load_page(page_num)
+        elements = []
+        dpi = self.config.get("processing", "dpi")
+        
+        # 提取文本
+        if self.config.get("output", "include_text"):
+            try:
+                text = page.get_text("text")
+                if text.strip():
+                    elements.append({
+                        "type": "text",
+                        "content": text,
+                        "page": page_num + 1
+                    })
+            except Exception as e:
+                self.logger.warning(f"提取页面 {page_num + 1} 文本时发生错误: {e}")
+        
+        # 提取图像
+        if self.config.get("output", "include_images"):
+            try:
+                image_list = page.get_images()
+                for img_index, img in enumerate(image_list):
+                    xref = img[0]
+                    base_image = doc.extract_image(xref)
+                    image_bytes = base_image["image"]
+                    
+                    # 保存图像
+                    image_ext = base_image["ext"]
+                    image_path = os.path.join(
+                        self.task_temp_dir, 
+                        f"page_{page_num+1}_img_{img_index+1}.{image_ext}"
+                    )
+                    
+                    with open(image_path, "wb") as f:
+                        f.write(image_bytes)
+                    
+                    elements.append({
+                        "type": "image",
+                        "path": image_path,
+                        "page": page_num + 1
+                    })
+                    self.stats["images_extracted"] += 1
+            except Exception as e:
+                self.logger.warning(f"提取页面 {page_num + 1} 图像时发生错误: {e}")
+        
+        # 转换为高分辨率图像用于OCR和表格检测
+        try:
+            mat = fitz.Matrix(dpi / 72, dpi / 72)
+            pix = page.get_pixmap(matrix=mat)
+            img_data = pix.tobytes("png")
+            
+            # 使用OpenCV处理图像
+            nparr = np.frombuffer(img_data, np.uint8)
+            img_cv = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+            
+            # 检测表格区域
+            if self.config.get("output", "include_tables"):
+                try:
+                    tables = self.detect_tables(img_cv, page_num + 1)
+                    elements.extend(tables)
+                    self.stats["tables_detected"] += len(tables)
+                except Exception as e:
+                    self.logger.warning(f"检测页面 {page_num + 1} 表格时发生错误: {e}")
+            
+            # 检测数学公式区域
+            if self.config.get("output", "include_formulas"):
+                try:
+                    formulas = self.detect_formulas(img_cv, page_num + 1)
+                    elements.extend(formulas)
+                    self.stats["formulas_detected"] += len(formulas)
+                except Exception as e:
+                    self.logger.warning(f"检测页面 {page_num + 1} 公式时发生错误: {e}")
+                    
+        except Exception as e:
+            self.logger.warning(f"处理页面 {page_num + 1} 图像时发生错误: {e}")
+        
+        return elements
+    
+    def detect_tables(self, image: np.ndarray, page_num: int) -> List[Dict]:
+        """检测图像中的表格区域"""
+        try:
+            # 转换为灰度图
+            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+            
+            # 使用边缘检测和轮廓查找来检测表格
+            edges = cv2.Canny(gray, 50, 150, apertureSize=3)
+            contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            
+            tables = []
+            min_area = self.config.get("processing", "min_table_area")
+            
+            for i, contour in enumerate(contours):
+                area = cv2.contourArea(contour)
+                if area > min_area:
+                    x, y, w, h = cv2.boundingRect(contour)
+                    
+                    # 裁剪表格区域
+                    table_region = image[y:y+h, x:x+w]
+                    
+                    # 保存表格图像
+                    table_path = os.path.join(self.task_temp_dir, f"page_{page_num}_table_{i+1}.png")
+                    cv2.imwrite(table_path, table_region)
+                    
+                    # 使用OCR识别表格内容
+                    table_content = self.recognize_table(table_region)
+                    
+                    tables.append({
+                        "type": "table",
+                        "path": table_path,
+                        "content": table_content,
+                        "page": page_num,
+                        "position": (x, y, w, h)
+                    })
+            
+            return tables
+        except Exception as e:
+            self.logger.warning(f"检测表格时发生错误: {e}")
+            return []
+    
+    def recognize_table(self, table_image: np.ndarray) -> str:
+        """识别表格内容"""
+        try:
+            # 使用PaddleOCR识别表格文本
+            result = self.table_ocr.ocr(table_image, cls=True)
+            
+            if not result:
+                return "| 无法识别的表格 |\n| --- |"
+            
+            # 提取文本和位置
+            cells = []
+            for line in result:
+                if line and line[0]:
+                    for word_info in line:
+                        text = word_info[1][0]
+                        bbox = word_info[0]
+                        x_center = (bbox[0][0] + bbox[2][0]) / 2
+                        y_center = (bbox[0][1] + bbox[2][1]) / 2
+                        cells.append({
+                            "text": text,
+                            "x": x_center,
+                            "y": y_center
+                        })
+            
+            # 按行和列组织单元格
+            if not cells:
+                return "| 无法识别的表格 |\n| --- |"
+            
+            # 按y坐标分组行
+            sorted_cells = sorted(cells, key=lambda c: c["y"])
+            rows = []
+            current_row = [sorted_cells[0]]
+            row_threshold = self.config.get("processing", "row_threshold")
+            
+            for i in range(1, len(sorted_cells)):
+                if abs(sorted_cells[i]["y"] - sorted_cells[i-1]["y"]) < row_threshold:
+                    current_row.append(sorted_cells[i])
+                else:
+                    rows.append(current_row)
+                    current_row = [sorted_cells[i]]
+            rows.append(current_row)
+            
+            # 每行内按x坐标排序
+            for row in rows:
+                row.sort(key=lambda c: c["x"])
+            
+            # 生成Markdown表格
+            markdown_table = ""
+            for i, row in enumerate(rows):
+                if i == 0:
+                    # 表头
+                    markdown_table += "| " + " | ".join([cell["text"] for cell in row]) + " |\n"
+                    markdown_table += "| " + " | ".join(["---"] * len(row)) + " |\n"
+                else:
+                    # 表格内容
+                    markdown_table += "| " + " | ".join([cell["text"] for cell in row]) + " |\n"
+            
+            return markdown_table
+            
+        except Exception as e:
+            self.logger.warning(f"识别表格时发生错误: {e}")
+            return "| 表格识别错误 |\n| --- |"
+    
+    def detect_formulas(self, image: np.ndarray, page_num: int) -> List[Dict]:
+        """检测图像中的数学公式区域"""
+        try:
+            # 转换为灰度图
+            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+            
+            # 使用二值化处理
+            _, binary = cv2.threshold(gray, 200, 255, cv2.THRESH_BINARY_INV)
+            
+            # 查找轮廓
+            contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            
+            formulas = []
+            min_area = self.config.get("processing", "min_formula_area")
+            
+            for i, contour in enumerate(contours):
+                area = cv2.contourArea(contour)
+                if area > min_area:
+                    x, y, w, h = cv2.boundingRect(contour)
+                    
+                    # 裁剪公式区域
+                    formula_region = image[y:y+h, x:x+w]
+                    
+                    # 保存公式图像
+                    formula_path = os.path.join(self.task_temp_dir, f"page_{page_num}_formula_{i+1}.png")
+                    cv2.imwrite(formula_path, formula_region)
+                    
+                    formulas.append({
+                        "type": "formula",
+                        "path": formula_path,
+                        "page": page_num,
+                        "position": (x, y, w, h)
+                    })
+            
+            return formulas
+        except Exception as e:
+            self.logger.warning(f"检测公式时发生错误: {e}")
+            return []
+    
+    def convert_to_markdown(self, elements: List[Dict], output_md_path: str) -> None:
+        """将提取的元素转换为Markdown格式"""
+        self.logger.info("开始转换为Markdown格式")
+        
+        # 按页码排序元素
+        elements.sort(key=lambda x: x.get("page", 0))
+        
+        with open(output_md_path, 'w', encoding='utf-8') as md_file:
+            current_page = 0
+            
+            for element in elements:
+                # 添加页码标题
+                if self.config.get("output", "page_headers") and element["page"] != current_page:
+                    current_page = element["page"]
+                    md_file.write(f"\n# 第 {current_page} 页\n\n")
+                
+                # 处理不同类型的元素
+                try:
+                    if element["type"] == "text" and self.config.get("output", "include_text"):
+                        self._process_text_element(element, md_file)
+                    
+                    elif element["type"] == "image" and self.config.get("output", "include_images"):
+                        self._process_image_element(element, md_file, output_md_path)
+                    
+                    elif element["type"] == "table" and self.config.get("output", "include_tables"):
+                        self._process_table_element(element, md_file, output_md_path)
+                    
+                    elif element["type"] == "formula" and self.config.get("output", "include_formulas"):
+                        self._process_formula_element(element, md_file, output_md_path)
+                        
+                except Exception as e:
+                    self.logger.warning(f"处理元素时发生错误: {e}")
+                    self.stats["errors"] += 1
+    
+    def _process_text_element(self, element: Dict, md_file) -> None:
+        """处理文本元素"""
+        text = element["content"].strip()
+        if text:
+            # 检测标题
+            if len(text) < 50 and not text.endswith(('.', '。', '，', ',')):
+                md_file.write(f"## {text}\n\n")
+            else:
+                # 处理段落
+                paragraphs = text.split('\n\n')
+                for para in paragraphs:
+                    if para.strip():
+                        md_file.write(f"{para.strip()}\n\n")
+    
+    def _process_image_element(self, element: Dict, md_file, output_md_path: str) -> None:
+        """处理图像元素"""
+        rel_path = os.path.relpath(element["path"], os.path.dirname(output_md_path))
+        md_file.write(f"![图像]({rel_path})\n\n")
+    
+    def _process_table_element(self, element: Dict, md_file, output_md_path: str) -> None:
+        """处理表格元素"""
+        md_file.write(f"**表格**\n\n")
+        md_file.write(f"{element['content']}\n\n")
+        
+        if self.config.get("output", "table_images"):
+            rel_path = os.path.relpath(element["path"], os.path.dirname(output_md_path))
+            md_file.write(f"![表格图像]({rel_path})\n\n")
+    
+    def _process_formula_element(self, element: Dict, md_file, output_md_path: str) -> None:
+        """处理公式元素"""
+        rel_path = os.path.relpath(element["path"], os.path.dirname(output_md_path))
+        md_file.write(f"![公式]({rel_path})\n\n")
+    
+    def cleanup(self) -> None:
+        """清理临时文件"""
+        try:
+            import shutil
+            if os.path.exists(self.task_temp_dir):
+                shutil.rmtree(self.task_temp_dir)
+                self.logger.info(f"已清理临时目录: {self.task_temp_dir}")
+        except Exception as e:
+            self.logger.warning(f"清理临时文件时发生错误: {e}")
+
+# 主函数
+def main():
+    """主函数"""
+    parser = argparse.ArgumentParser(description="PDF转Markdown转换工具")
+    parser.add_argument("input", help="输入PDF文件路径")
+    parser.add_argument("output", help="输出Markdown文件路径")
+    parser.add_argument("-c", "--config", help="配置文件路径")
+    parser.add_argument("-v", "--verbose", action="store_true", help="详细输出")
+    
+    args = parser.parse_args()
+    
+    # 设置日志级别
+    log_level = "DEBUG" if args.verbose else "INFO"
+    
+    # 初始化配置和日志
+    config = ConfigManager(args.config)
+    logger = setup_logging(log_level, config.get("general", "log_file"))
+    
+    try:
+        # 执行转换
+        converter = AdvancedPDFToMarkdownConverter(config, logger)
+        result = converter.process_pdf(args.input, args.output)
+        
+        print(f"转换完成!")
+        print(f"统计信息: {json.dumps(result, indent=2, ensure_ascii=False)}")
+        
+        # converter.cleanup()
+        
+    except Exception as e:
+        logger.error(f"转换失败: {e}")
+        return 1
+    
+    return 0
+
+if __name__ == "__main__":
+    exit(main())

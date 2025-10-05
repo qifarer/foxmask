@@ -20,7 +20,6 @@ from .schemas import (
     BizDataSyncMessage
 )
 from foxmask.knowledge.services import knowledge_processing_service
-from foxmask.file.services import file_service
 from foxmask.task.services import task_service
 from .dead_letter_processor import dead_letter_processor
 from foxmask.tag.services import tag_service

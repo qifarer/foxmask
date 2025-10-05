@@ -16,7 +16,7 @@ from foxmask.core.config import settings
 from foxmask.core.mongo import  connect_to_mongo, close_mongo_connection, mongodb
 from foxmask.core.kafka import kafka_manager
 from foxmask.core.scheduler import scheduler
-from foxmask.core.logger import logger, setup_logger
+from foxmask.core.logger import logger
 from foxmask.task.message.consumers import task_consumer
 from foxmask.task.message.dead_letter_processor import dead_letter_processor
 from foxmask.core.middleware.error_handler import ErrorHandlerMiddleware, RateLimitMiddleware
@@ -29,16 +29,12 @@ from foxmask.auth.router import router as auth_router
 #from foxmask.tag.router import router as tag_router
 #from foxmask.task.router import router as task_router
 
-# Import GraphQL schemas
-from foxmask.file.graphql import FileQuery, FileMutation
-from foxmask.knowledge.graphql import (
-    KnowledgeBaseQuery,KnowledgeItemQuery,
-    KnowledgeItemMutation,KnowledgeBaseMutation
-)
-
 from foxmask.tag.graphql import TagQuery, TagMutation
 from foxmask.task.graphql import TaskQuery, TaskMutation
+
 from foxmask.file.mongo import init_file_db
+# from foxmask.file.api.routers import file_router, upload_router
+
 from foxmask.knowledge.mongo import init_knowledge_db_with_client
 
 # Import utils clients
@@ -48,13 +44,51 @@ from foxmask.utils.minio_client import minio_client
 from foxmask.task.message.kafka_topic import setup_kafka_topics
 from foxmask.shared.dependencies import get_context
 
+from foxmask.graphql import schema
+
+def create_graphql_app() -> GraphQLRouter:
+    """创建GraphQL路由"""
+    return GraphQLRouter(
+        schema,
+        context_getter=get_context,
+        graphiql=True,
+        debug=True
+    )
+
+def setup_rest_endpoints(app: FastAPI):
+    """设置RESTful端点（可选）"""
+    app.include_router(auth_router, prefix="/api/auth")
+
+#    app.include_router(file_router, prefix="/api/v1/files", tags=["files"])
+ #   app.include_router(upload_router, prefix="/api/v1/upload", tags=["upload"])
+
+
+def setup_graphql_endpoints(app: FastAPI):
+    """设置GraphQL端点"""
+    graphql_app = create_graphql_app()
+    
+    # 注册GraphQL路由
+    app.include_router(graphql_app, prefix="/graphql", tags=["graphql"])
+    
+    # 可选：注册其他RESTful端点
+    setup_rest_endpoints(app)
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan management"""
-    setup_logger()  # 配置日志
+    # setup_logger()  # 配置日志
     # Startup
     await connect_to_mongo()
-    await init_file_db()
+
+    # Debug what you're actually passing
+    print(f"mongodb.client type: {type(mongodb.client)}")
+    print(f"mongodb.client: {mongodb.client}")
+    print(f"mongodb.database type: {type(mongodb.database)}")
+    print(f"mongodb.database: {mongodb.database}")
+    
+    file_db = init_file_db(motor_client=mongodb.client, database_name='foxmask')
+    await file_db.init_file_db()
+
     await init_knowledge_db_with_client(mongodb.client)
     
     # 设置所需Topic
@@ -81,6 +115,7 @@ async def lifespan(app: FastAPI):
     
     yield
     
+    await file_db.close()
     # Shutdown
     await close_mongo_connection()
     #await task_consumer.stop_consumers()
@@ -112,34 +147,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include REST API routers
-app.include_router(auth_router, prefix="/api/auth")
-# app.include_router(file_router, prefix="/api")
-# app.include_router(knowledge_router, prefix="/api")
-# app.include_router(tag_router, prefix="/api")
-# app.include_router(task_router, prefix="/api")
-
-# Create GraphQL schema by combining all queries and mutations
-
-
-@strawberry.type
-class Query(
-    FileQuery,
-    KnowledgeItemQuery,
-    KnowledgeBaseQuery,
-):
-    pass
-
-@strawberry.type
-class Mutation(
-    FileMutation,
-    KnowledgeItemMutation,
-    KnowledgeBaseMutation,
-):
-    pass
-schema = strawberry.Schema(query=Query, mutation=Mutation)
-graphql_app = GraphQLRouter(schema, context_getter=get_context)
-app.include_router(graphql_app, prefix="/graphql")
+ # 设置GraphQL端点
+setup_graphql_endpoints(app)
 
 # Health check endpoint
 @app.get("/")

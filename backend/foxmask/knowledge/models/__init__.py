@@ -1,22 +1,20 @@
 #
 from .knowledge_base import (
-    KnowledgeBase,
-    KnowledgeBaseStatusEnum
+    KnowledgeBase
 )
 from .knowledge_item import (
-    ItemContentTypeEnum,
-    KnowledgeItem,
-    KnowledgeItemContent,
-    KnowledgeItemStatusEnum,
     KnowledgeItemTypeEnum,
+    ItemChunkTypeEnum,
+    KnowledgeItem,
+    KnowledgeItemInfo,
+    KnowledgeItemChunk,
 )
 
 __ALL__=[
     KnowledgeBase,
-    KnowledgeBaseStatusEnum,
-    KnowledgeItem,
-    KnowledgeItemContent,
-    KnowledgeItemStatusEnum,
     KnowledgeItemTypeEnum,
-    ItemContentTypeEnum
+    ItemChunkTypeEnum,
+    KnowledgeItem,
+    KnowledgeItemInfo,
+    KnowledgeItemChunk,
 ]

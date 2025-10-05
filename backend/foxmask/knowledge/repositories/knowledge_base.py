@@ -5,9 +5,8 @@ from typing import List, Optional, Dict, Any
 from beanie import PydanticObjectId
 from foxmask.knowledge.models import (
     KnowledgeBase, 
-    KnowledgeBaseStatusEnum
 )    
-from foxmask.core.model import Visibility
+from foxmask.core.model import Visibility,Status
 from foxmask.utils.helpers import get_current_time
 
 
@@ -31,7 +30,7 @@ class KnowledgeBaseRepository:
         tenant_id: str, 
         skip: int = 0, 
         limit: int = 100,
-        status: Optional[KnowledgeBaseStatusEnum] = None,
+        status: Optional[Status] = None,
         category: Optional[str] = None
     ) -> List[KnowledgeBase]:
         """根据租户ID列出知识库"""
@@ -53,7 +52,7 @@ class KnowledgeBaseRepository:
         user_id: str,
         skip: int = 0, 
         limit: int = 100,
-        status: Optional[KnowledgeBaseStatusEnum] = None
+        status: Optional[Status] = None
     ) -> List[KnowledgeBase]:
         """根据用户ID列出知识库"""
         query = (KnowledgeBase.tenant_id == tenant_id) & (
@@ -96,7 +95,7 @@ class KnowledgeBaseRepository:
         query: str,
         skip: int = 0,
         limit: int = 100,
-        status: Optional[KnowledgeBaseStatusEnum] = None
+        status: Optional[Status] = None
     ) -> List[KnowledgeBase]:
         """搜索知识库"""
         search_query = {
@@ -115,7 +114,7 @@ class KnowledgeBaseRepository:
     async def update_status(
         self, 
         id: PydanticObjectId, 
-        status: KnowledgeBaseStatusEnum
+        status: Status
     ) -> Optional[KnowledgeBase]:
         """更新知识库状态"""
         knowledge_base = await self.get_by_id(id)

@@ -2,8 +2,9 @@
 # foxmask/core/exceptions.py
 # Custom exception classes for Foxmask application
 from fastapi import HTTPException, status
-from typing import Optional, Dict, Any, List
-import json
+from typing import Optional, Dict, Any
+from loguru import logger
+
 
 class FoxmaskException(HTTPException):
     """Base exception for Foxmask application"""
@@ -280,3 +281,104 @@ class RetryableError(FoxmaskException):
             context=context,
             headers=headers
         )
+
+
+class KnowledgeBaseException(Exception):
+    """知识库基础异常类"""
+    
+    def __init__(
+        self, 
+        message: str, 
+        error_code: str = "KNOWLEDGE_BASE_ERROR",
+        details: Optional[Dict[str, Any]] = None,
+        log_level: str = "ERROR"
+    ):
+        self.message = message
+        self.error_code = error_code
+        self.details = details or {}
+        self.log_level = log_level
+        super().__init__(self.message)
+        
+        # 记录日志
+        self._log_exception()
+    
+    def _log_exception(self):
+        """记录异常日志"""
+        log_method = getattr(logger, self.log_level.lower())
+        log_method(
+            "ErrorCode: {} | Message: {} | Details: {}",
+            self.error_code, self.message, self.details
+        )
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """转换为字典格式"""
+        return {
+            "error_code": self.error_code,
+            "message": self.message,
+            "details": self.details
+        }
+
+
+class ValidationException(KnowledgeBaseException):
+    """数据验证异常"""
+    def __init__(self, message: str, field: Optional[str] = None, value: Any = None):
+        details = {}
+        if field:
+            details["field"] = field
+        if value is not None:
+            details["value"] = value
+        super().__init__(message, "VALIDATION_ERROR", details, "WARNING")
+
+
+class NotFoundException(KnowledgeBaseException):
+    """资源未找到异常"""
+    def __init__(self, resource_type: str, resource_id: str):
+        message = f"{resource_type} not found: {resource_id}"
+        details = {"resource_type": resource_type, "resource_id": resource_id}
+        super().__init__(message, "NOT_FOUND_ERROR", details, "WARNING")
+
+
+class DuplicateException(KnowledgeBaseException):
+    """重复资源异常"""
+    def __init__(self, resource_type: str, identifier: str):
+        message = f"{resource_type} already exists: {identifier}"
+        details = {"resource_type": resource_type, "identifier": identifier}
+        super().__init__(message, "DUPLICATE_ERROR", details, "WARNING")
+
+
+class PermissionException(KnowledgeBaseException):
+    """权限异常"""
+    def __init__(self, action: str, resource: str, user_id: Optional[str] = None):
+        message = f"Permission denied for {action} on {resource}"
+        details = {"action": action, "resource": resource}
+        if user_id:
+            details["user_id"] = user_id
+        super().__init__(message, "PERMISSION_ERROR", details, "WARNING")
+
+
+class DatabaseException(KnowledgeBaseException):
+    """数据库操作异常"""
+    def __init__(self, operation: str, collection: str, error: str):
+        message = f"Database operation failed: {operation} on {collection}"
+        details = {"operation": operation, "collection": collection, "error": error}
+        super().__init__(message, "DATABASE_ERROR", details, "ERROR")
+
+
+class ServiceException(Exception):
+    def __init__(self, operation: str = "", error: str = ""):
+        super().__init__(f"{operation}: {error}")
+        self.operation = operation
+        self.error = error
+
+
+class ExternalServiceException(KnowledgeBaseException):
+    """外部服务异常"""
+    def __init__(self, service_name: str, operation: str, status_code: int, error: str):
+        message = f"External service error: {service_name}.{operation}"
+        details = {
+            "service": service_name, 
+            "operation": operation, 
+            "status_code": status_code,
+            "error": error
+        }
+        super().__init__(message, "EXTERNAL_SERVICE_ERROR", details, "ERROR")       

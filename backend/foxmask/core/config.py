@@ -38,8 +38,8 @@ class Settings(BaseSettings):
     
     # MinIO
     MINIO_ENDPOINT: str = Field("localhost:9000", env="MINIO_ENDPOINT")
-    MINIO_ACCESS_KEY: SecretStr = Field(..., env="MINIO_ACCESS_KEY")
-    MINIO_SECRET_KEY: SecretStr = Field(..., env="MINIO_SECRET_KEY")
+    MINIO_ACCESS_KEY: SecretStr = Field(None, env="MINIO_ACCESS_KEY")
+    MINIO_SECRET_KEY: SecretStr = Field(None, env="MINIO_SECRET_KEY")
     MINIO_BUCKET_NAME: str = Field("foxmask", env="MINIO_BUCKET_NAME")
     MINIO_SECURE: bool = Field(False, env="MINIO_SECURE")
     MINIO_REGION: str = Field("us-east-1", env="MINIO_REGION")
@@ -50,6 +50,15 @@ class Settings(BaseSettings):
     KAFKA_KNOWLEDGE_TOPIC: str = Field("knowledge_processing", env="KAFKA_KNOWLEDGE_TOPIC")
     
     # Weaviate
+    # .env 数据库
+    WEAVIATE_HOST: str = Field("localhost", env="WEAVIATE_HOST")  # 添加类型注解并将值改为字符串
+    WEAVIATE_PORT: int = Field(9080, env="WEAVIATE_PORT")         # 添加类型注解
+    WEAVIATE_GRPC_HOST: str = Field("localhost", env="WEAVIATE_GRPC_HOST") 
+    WEAVIATE_GRPC_PORT: int = Field(50051, env="WEAVIATE_GRPC_PORT") 
+    WEAVIATE_INITIALIZE_TIMEOUT: int = Field(360, env="WEAVIATE_INITIALIZE_TIMEOUT") 
+    WEAVIATE_QUERY_TIMEOUT: int = Field(6000, env="WEAVIATE_QUERY_TIMEOUT") 
+    WEAVIATE_INSERT_TIMEOUT: int = Field(1200, env="WEAVIATE_INSERT_TIMEOUT") 
+
     WEAVIATE_URL: AnyUrl = Field("http://localhost:8080", env="WEAVIATE_URL")
     WEAVIATE_API_KEY: Optional[SecretStr] = Field(None, env="WEAVIATE_API_KEY")
     

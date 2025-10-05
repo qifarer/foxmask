@@ -12,42 +12,12 @@ from foxmask.core.config import settings
 from foxmask.core.logger import logger
 from foxmask.auth.services import auth_service
 from foxmask.utils.casdoor_client import casdoor_client
-from foxmask.file.api.schemas import ChunkUploadRequest
+
 import json
 from pydantic import ValidationError
 
 api_key_header = APIKeyHeader(name="Authorization", auto_error=False)
 
-async def get_chunk_upload_request(
-    data: str = Form(..., description="JSON serialized ChunkUploadRequest")
-) -> ChunkUploadRequest:
-    """
-    从表单字段解析 ChunkUploadRequest
-    """
-    try:
-        logger.warning(f"Received data field: {data}")
-        
-        # 解析JSON数据
-        request_data = json.loads(data)
-        logger.warning(f"Parsed JSON data: {request_data}")
-        
-        chunk_request = ChunkUploadRequest(**request_data)
-        logger.warning(f"Successfully created ChunkUploadRequest: {chunk_request.model_dump()}")
-        
-        return chunk_request
-        
-    except json.JSONDecodeError as e:
-        logger.error(f"JSON decode error: {str(e)}, data: {data}")
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Invalid JSON format: {str(e)}"
-        )
-    except ValidationError as e:
-        logger.error(f"Validation error: {e}, data: {request_data}")
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Validation error: {e}"
-        )
 
 # Casdoor 配置
 CASDOOR_CONFIG = {
@@ -104,6 +74,47 @@ async def get_user_from_token(
         "permissions": token_payload.get("permissions", []),
         "roles": token_payload.get("roles", [])
     }
+
+
+class GraphQLContext:
+    """GraphQL上下文管理器"""
+    
+    def __init__(self, request, user_id: str = None, tenant_id: str = None):
+        self.request = request
+        self.user_id = user_id or "system"
+        self.tenant_id = tenant_id or "default"
+        self.ip_address = self._get_client_ip(request)
+    
+    def _get_client_ip(self, request):
+        """获取客户端IP地址"""
+        if hasattr(request, "headers"):
+            x_forwarded_for = request.headers.get("X-Forwarded-For")
+            if x_forwarded_for:
+                return x_forwarded_for.split(",")[0]
+            return request.headers.get("X-Real-IP") or "unknown"
+        return "unknown"
+    
+    def to_dict(self):
+        """转换为字典"""
+        return {
+            "user_id": self.user_id,
+            "tenant_id": self.tenant_id,
+            "ip_address": self.ip_address
+        }
+
+
+async def get_context1(request) -> dict:
+    """获取GraphQL上下文"""
+    # 这里应该实现真实的用户认证和租户识别逻辑
+    # 目前使用模拟数据
+    
+    # 从请求头获取用户信息
+    user_id = request.headers.get("X-User-ID", "system")
+    tenant_id = request.headers.get("X-Tenant-ID", "default")
+    
+    context = GraphQLContext(request, user_id, tenant_id)
+    return context.to_dict()
+
 
 async def get_context(
     token_payload: Dict[str, Any] = Depends(verify_jwt_token),
