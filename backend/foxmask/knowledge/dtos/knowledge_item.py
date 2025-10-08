@@ -3,6 +3,7 @@ from typing import List, Optional, Dict, Any
 from beanie import PydanticObjectId
 from foxmask.knowledge.models import KnowledgeItemTypeEnum, ItemChunkTypeEnum
 from foxmask.core.model import Visibility, Status
+from datetime import datetime
 
 class KnowledgeItemDTO(BaseModel):
     id: Optional[PydanticObjectId] = None
@@ -17,8 +18,8 @@ class KnowledgeItemDTO(BaseModel):
     note: Optional[str] = None
     status: Status = Status.DRAFT
     visibility: Visibility = Visibility.PUBLIC
-    created_at: str
-    updated_at: str
+    created_at: datetime
+    updated_at: datetime
     archived_at: Optional[str] = None
     created_by: Optional[str] = None
     allowed_users: List[str] = Field(default_factory=list)
@@ -83,8 +84,8 @@ class KnowledgeItemInfoDTO(BaseModel):
     para_blocks: List[Dict[str, Any]] = Field(default_factory=list)
     discarded_blocks: List[Dict[str, Any]] = Field(default_factory=list)
     note: Optional[str] = None
-    created_at: str
-    updated_at: str
+    created_at: datetime
+    updated_at: datetime
 
 class KnowledgeItemInfoCreateDTO(BaseModel):
     uid: str = Field(..., description="UID")
@@ -127,8 +128,8 @@ class KnowledgeItemChunkDTO(BaseModel):
     position: Dict[str, float] = Field(default_factory=dict)
     size: Dict[str, float] = Field(default_factory=dict)
     vector_id: Optional[str] = None
-    created_at: str
-    updated_at: str
+    created_at: datetime
+    updated_at: datetime
 
 class KnowledgeItemChunkCreateDTO(BaseModel):
     uid: str = Field(..., description="UID")

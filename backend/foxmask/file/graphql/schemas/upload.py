@@ -3,6 +3,7 @@ from typing import Optional, List
 from strawberry.scalars import JSON
 from strawberry.file_uploads import Upload
 from datetime import datetime
+
 from .enums import (
     FileTypeGql, 
     UploadProcStatusGql, 
@@ -11,31 +12,45 @@ from .enums import (
 )
 from foxmask.core.schema import StatusEnum, VisibilityEnum, BaseResponse
 
+
+# ============================
 # 基础类型
+# ============================
+
 @strawberry.type
 class Error:
+    """错误信息"""
     message: str
     code: str
     field: Optional[str] = None
 
+
 @strawberry.type
 class PageInfo:
+    """分页信息"""
     has_next_page: bool
     has_previous_page: bool
     total_count: Optional[int] = None
     current_page: int = 1
     total_pages: Optional[int] = None
 
+
 @strawberry.input
 class PaginationInput:
+    """分页输入参数"""
     page: int = 1
     page_size: int = 20
     sort_by: Optional[str] = None
     sort_order: str = "desc"
 
+
+# ============================
 # 实体类型
+# ============================
+
 @strawberry.type
 class UploadTaskFileChunk:
+    """上传任务文件分块"""
     uid: str
     tenant_id: str
     master_id: str
@@ -57,8 +72,10 @@ class UploadTaskFileChunk:
     updated_at: Optional[datetime] = None
     proc_status: UploadProcStatusGql = UploadProcStatusGql.PENDING
 
+
 @strawberry.type
 class UploadTaskFile:
+    """上传任务文件"""
     uid: str
     tenant_id: str
     master_id: str
@@ -89,8 +106,10 @@ class UploadTaskFile:
     proc_status: UploadProcStatusGql = UploadProcStatusGql.PENDING
     chunks: Optional[List[UploadTaskFileChunk]] = None
 
+
 @strawberry.type
 class UploadTask:
+    """上传任务"""
     uid: str
     tenant_id: str
     title: str
@@ -104,21 +123,21 @@ class UploadTask:
     updated_at: datetime
     archived_at: Optional[datetime] = None
     created_by: Optional[str] = None
-    allowed_users: List[str] = strawberry.field(default_factory=list)  # 修复这里
-    allowed_roles: List[str] = strawberry.field(default_factory=list)  # 修复这里
+    allowed_users: List[str] = strawberry.field(default_factory=list)
+    allowed_roles: List[str] = strawberry.field(default_factory=list)
     proc_meta: Optional[JSON] = None
     error_info: Optional[JSON] = None
     metadata: Optional[JSON] = None
     proc_status: UploadProcStatusGql = UploadProcStatusGql.PENDING
     source_type: UploadSourceTypeGql = UploadSourceTypeGql.SINGLE_FILE
-    source_paths: List[str] = strawberry.field(default_factory=list)  # 修复这里
+    source_paths: List[str] = strawberry.field(default_factory=list)
     upload_strategy: UploadStrategyGql = UploadStrategyGql.SEQUENTIAL
     max_parallel_uploads: int = 2
     chunk_size: int = 5 * 1024 * 1024
     preserve_structure: bool = False
     base_upload_path: Optional[str] = None
     auto_extract_metadata: bool = False
-    file_type_filters: List[FileTypeGql] = strawberry.field(default_factory=list)  # 修复这里
+    file_type_filters: List[FileTypeGql] = strawberry.field(default_factory=list)
     max_file_size: Optional[int] = None
     discovered_files: int = 0
     processing_files: int = 0
@@ -129,11 +148,16 @@ class UploadTask:
     uploaded_size: int = 0
     discovery_started_at: Optional[datetime] = None
     discovery_completed_at: Optional[datetime] = None
-    files: Optional[List["UploadTaskFile"]] = None
+    files: Optional[List[UploadTaskFile]] = None
 
+
+# ============================
 # 进度监控类型
+# ============================
+
 @strawberry.type
 class FileUploadProgress:
+    """文件上传进度"""
     file_id: str
     filename: str
     progress: float
@@ -143,8 +167,10 @@ class FileUploadProgress:
     estimated_time_remaining: Optional[float] = None
     current_chunk: Optional[int] = None
 
+
 @strawberry.type
 class UploadProgress:
+    """上传进度"""
     task_id: str
     total_files: int
     completed_files: int
@@ -156,8 +182,10 @@ class UploadProgress:
     estimated_time_remaining: Optional[float] = None
     current_uploading_files: Optional[List[FileUploadProgress]] = None
 
+
 @strawberry.type
 class UploadTaskStats:
+    """上传任务统计"""
     total_tasks: int
     active_tasks: int
     completed_tasks: int
@@ -167,8 +195,10 @@ class UploadTaskStats:
     average_upload_speed: Optional[float] = None
     success_rate: float = 0.0
 
+
 @strawberry.type
 class UploadResumeInfo:
+    """上传恢复信息"""
     task_id: str
     file_id: str
     uploaded_chunks: int
@@ -178,16 +208,14 @@ class UploadResumeInfo:
     uploaded_size: int
     progress: float
 
-# 输入类型
-@strawberry.input
-class PaginationParams:
-    page: int = 1
-    page_size: int = 20
-    sort_by: Optional[str] = None
-    sort_order: str = "desc"
+
+# ============================
+# 输入类型 - 上传操作
+# ============================
 
 @strawberry.input
 class InitializeUploadInput:
+    """初始化上传输入"""
     tenant_id: Optional[str] = None
     created_by: Optional[str] = None
     title: str
@@ -205,8 +233,10 @@ class InitializeUploadInput:
     files: Optional[List["InitializeUploadFileInput"]] = None
     resume_task_id: Optional[str] = None
 
+
 @strawberry.input
 class InitializeUploadFileInput:
+    """初始化上传文件输入"""
     original_path: str
     filename: str
     file_size: int
@@ -215,8 +245,10 @@ class InitializeUploadFileInput:
     extension: str
     chunk_size: int
 
+
 @strawberry.input
 class UploadChunkInput:
+    """上传分块输入"""
     tenant_id: Optional[str] = None
     task_id: str
     file_id: str
@@ -232,23 +264,32 @@ class UploadChunkInput:
     checksum_sha256: Optional[str] = None
     max_retries: int = 3
 
+
 @strawberry.input
 class CompleteUploadInput:
+    """完成上传输入"""
     task_id: str
     file_id: str
     checksum_md5: Optional[str] = None
     checksum_sha256: Optional[str] = None
     force_complete: Optional[bool] = False
 
+
 @strawberry.input
 class ResumeUploadInput:
+    """恢复上传输入"""
     task_id: str
     tenant_id: str
     created_by: str
 
-# 查询和过滤输入类型
+
+# ============================
+# 输入类型 - 查询和过滤
+# ============================
+
 @strawberry.input
 class UploadTaskQueryInput:
+    """上传任务查询输入"""
     tenant_id: str
     task_id: Optional[str] = None
     created_by: Optional[str] = None
@@ -260,30 +301,41 @@ class UploadTaskQueryInput:
     created_at_start: Optional[datetime] = None
     created_at_end: Optional[datetime] = None
 
+
 @strawberry.input
 class UploadTaskFileQueryInput:
+    """上传任务文件查询输入"""
     tenant_id: str
     task_id: Optional[str] = None
     file_id: Optional[str] = None
     proc_status: Optional[UploadProcStatusGql] = None
     file_type: Optional[FileTypeGql] = None
 
+
 @strawberry.input
 class UploadTaskFileChunkQueryInput:
+    """上传任务文件分块查询输入"""
     tenant_id: str
     file_id: Optional[str] = None
     chunk_number: Optional[int] = None
     proc_status: Optional[UploadProcStatusGql] = None
 
+
 @strawberry.input
 class ProgressQueryInput:
+    """进度查询输入"""
     task_id: str
     tenant_id: str
     include_file_details: bool = False
 
-# 更新输入类型
+
+# ============================
+# 输入类型 - 更新操作
+# ============================
+
 @strawberry.input
 class UploadTaskUpdateInput:
+    """上传任务更新输入"""
     title: Optional[str] = None
     desc: Optional[str] = None
     category: Optional[str] = None
@@ -296,8 +348,10 @@ class UploadTaskUpdateInput:
     error_info: Optional[JSON] = None
     metadata: Optional[JSON] = None
 
+
 @strawberry.input
 class UploadTaskProgressUpdateInput:
+    """上传任务进度更新输入"""
     discovered_files: Optional[int] = None
     processing_files: Optional[int] = None
     completed_files: Optional[int] = None
@@ -308,8 +362,10 @@ class UploadTaskProgressUpdateInput:
     discovery_started_at: Optional[datetime] = None
     discovery_completed_at: Optional[datetime] = None
 
+
 @strawberry.input
 class UploadTaskFileUpdateInput:
+    """上传任务文件更新输入"""
     proc_status: Optional[UploadProcStatusGql] = None
     uploaded_chunks: Optional[int] = None
     current_chunk: Optional[int] = None
@@ -323,55 +379,80 @@ class UploadTaskFileUpdateInput:
     upload_completed_at: Optional[datetime] = None
     note: Optional[str] = None
 
+
+# ============================
 # 响应类型
+# ============================
+
 @strawberry.type
 class InitializeUploadResponse(BaseResponse):
+    """初始化上传响应"""
     data: Optional[UploadTask] = None
+
 
 @strawberry.type
 class UploadChunkResponse(BaseResponse):
+    """上传分块响应"""
     data: Optional[UploadTaskFileChunk] = None
     next_chunk: Optional[int] = None
     progress: Optional[float] = None
     is_completed: Optional[bool] = None
 
+
 @strawberry.type
 class CompleteUploadResponse(BaseResponse):
+    """完成上传响应"""
     data: Optional[UploadTaskFile] = None
+
 
 @strawberry.type
 class GetUploadTaskResponse(BaseResponse):
+    """获取上传任务响应"""
     data: Optional[UploadTask] = None
+
 
 @strawberry.type
 class ListUploadTasksResponse(BaseResponse):
+    """上传任务列表响应"""
     data: Optional[List[UploadTask]] = None
     pagination: Optional[PageInfo] = None
 
+
 @strawberry.type
 class ListUploadTaskFilesResponse(BaseResponse):
+    """上传任务文件列表响应"""
     data: Optional[List[UploadTaskFile]] = None
     pagination: Optional[PageInfo] = None
 
+
 @strawberry.type
 class ListUploadTaskFileChunksResponse(BaseResponse):
+    """上传任务文件分块列表响应"""
     data: Optional[List[UploadTaskFileChunk]] = None
     pagination: Optional[PageInfo] = None
 
+
 @strawberry.type
 class ResumeUploadResponse(BaseResponse):
+    """恢复上传响应"""
     data: Optional[UploadTask] = None
     resumed_files: Optional[List[str]] = None
     total_files_to_resume: int = 0
 
+
 @strawberry.type
 class UploadProgressResponse(BaseResponse):
+    """上传进度响应"""
     data: Optional[UploadProgress] = None
+
 
 @strawberry.type
 class UploadTaskStatsResponse(BaseResponse):
+    """上传任务统计响应"""
     data: Optional[UploadTaskStats] = None
+
 
 @strawberry.type
 class UploadResumeInfoResponse(BaseResponse):
+    """上传恢复信息响应"""
     data: Optional[UploadResumeInfo] = None

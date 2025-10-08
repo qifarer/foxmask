@@ -10,15 +10,35 @@ from .management import (
     FileCreateDTO,
     FileUpdateDTO,
     FileResponseDTO,
-    FileQueryDTO,
     FileListDTO,
+    FileDownloadDTO,
+    FileUploadResponseDTO,
+    FileQueryDTO,
+    FileSearchDTO,
+    FileLogQueryDTO,  # 添加这一行
+    FileStatisticsDTO,
+    FileBulkUpdateDTO,
+    FileShareDTO,
     FileLogCreateDTO,
     FileLogResponseDTO,
-    FileLogQueryDTO,
-    FileLogListDTO,
-    FileStatsDTO,
-    FileOperationStatsDTO,
 )
+
+__all_management__ = [
+    "FileCreateDTO",
+    "FileUpdateDTO",
+    "FileResponseDTO",
+    "FileListDTO",
+    "FileDownloadDTO",
+    "FileUploadResponseDTO",
+    "FileQueryDTO",
+    "FileSearchDTO",
+    "FileLogQueryDTO",  # 添加这一行
+    "FileStatisticsDTO",
+    "FileBulkUpdateDTO",
+    "FileShareDTO",
+    "FileLogCreateDTO",
+    "FileLogResponseDTO",
+]
 
 # 上传模块DTO导出
 __all_upload__ = [
@@ -30,21 +50,6 @@ __all_upload__ = [
     UploadChunkInputDTO,
     CompleteUploadInputDTO,
     UploadTaskQueryDTO
-]
-
-# 文件管理模块DTO导出
-__all_management__ = [
-    FileCreateDTO,
-    FileUpdateDTO,
-    FileResponseDTO,
-    FileQueryDTO,
-    FileListDTO,
-    FileLogCreateDTO,
-    FileLogResponseDTO,
-    FileLogQueryDTO,
-    FileLogListDTO,
-    FileStatsDTO,
-    FileOperationStatsDTO,
 ]
 
 # 合并所有导出

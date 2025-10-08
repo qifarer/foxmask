@@ -41,6 +41,7 @@ class Settings(BaseSettings):
     MINIO_ACCESS_KEY: SecretStr = Field(None, env="MINIO_ACCESS_KEY")
     MINIO_SECRET_KEY: SecretStr = Field(None, env="MINIO_SECRET_KEY")
     MINIO_BUCKET_NAME: str = Field("foxmask", env="MINIO_BUCKET_NAME")
+    MINIO_BUCKET_PUBLIC: str = Field("public-bucket", env="MINIO_BUCKET_PUBLIC")
     MINIO_SECURE: bool = Field(False, env="MINIO_SECURE")
     MINIO_REGION: str = Field("us-east-1", env="MINIO_REGION")
     

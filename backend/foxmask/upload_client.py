@@ -2,7 +2,7 @@
 import asyncio
 import aiohttp
 import json
-import os
+import os, re
 import hashlib
 import base64
 from pathlib import Path
@@ -216,24 +216,37 @@ class UploadClient:
         file_type_filters: List[FileType],
         max_file_size: int
     ) -> List[Dict[str, Any]]:
-        """发现文件"""
+        """发现文件（排除隐藏文件/目录，以及数字结尾文件）"""
         file_infos = []
-        
+        number_suffix_pattern = re.compile(r'\d+$')
+
         for source_path in source_paths:
             if source_type in [UploadSourceType.SINGLE_FILE, UploadSourceType.MULTIPLE_FILES]:
-                # 文件上传
+                # 单文件或多文件上传
+                filename = os.path.basename(source_path)
+                # 跳过隐藏文件或数字结尾文件
+                if filename.startswith('.') or number_suffix_pattern.search(os.path.splitext(filename)[0]):
+                    continue
+
                 file_info = await self._analyze_file(source_path, source_path, preserve_structure, base_upload_path)
                 if file_info and self._filter_file(file_info, file_type_filters, max_file_size):
                     file_infos.append(file_info)
             else:
                 # 目录上传
                 for root, dirs, files in os.walk(source_path):
+                    # 排除隐藏目录（以 "." 开头）
+                    dirs[:] = [d for d in dirs if not d.startswith('.')]
+
                     for filename in files:
+                        # 排除隐藏文件或数字结尾文件
+                        if filename.startswith('.') or number_suffix_pattern.search(os.path.splitext(filename)[0]):
+                            continue
+
                         file_path = os.path.join(root, filename)
                         file_info = await self._analyze_file(file_path, source_path, preserve_structure, base_upload_path)
                         if file_info and self._filter_file(file_info, file_type_filters, max_file_size):
                             file_infos.append(file_info)
-        
+
         return file_infos
     
     def _filter_file(self, file_info: Dict[str, Any], file_type_filters: List[FileType], max_file_size: int) -> bool:
@@ -264,7 +277,7 @@ class UploadClient:
         统一上传接口
         """
         start_time = time.time()
-        
+        base_upload_path = 'file'
         try:
             # 标准化输入
             if isinstance(source_paths, str):
@@ -359,7 +372,7 @@ class UploadClient:
         
         if not file_infos:
             raise Exception("未发现可上传的文件")
-        
+        print(file_infos)
         total_size = sum(f["file_size"] for f in file_infos)
         print(f"📊 发现 {len(file_infos)} 个文件, 总大小: {total_size / 1024 / 1024:.2f} MB")
         
@@ -718,21 +731,20 @@ class UploadClient:
                     uid
                     title
                     totalFiles
+                    totalSize
                     completedFiles
                     failedFiles
-                    totalSize
                     uploadedSize
-                    progressPercentage: progress
                 }
             }
-        }
+          }
         }
         """
         
         try:
             result = await self.execute_graphql(query, {"taskId": task_id})
-            task_response = result["getUploadTask"]
-            
+            print(str(result))
+            task_response = result["upload"]["getUploadTask"]
             if not task_response["success"]:
                 return {"success": False, "error": "获取任务进度失败"}
             
@@ -758,11 +770,12 @@ async def main():
             
         # 测试文件
         filenames = [
-            "/Users/luoqi/Downloads/math-test-new-10-15.pdf",
-            "/Users/luoqi/Downloads/普通高中教科书·数学必修 第一册.pdf"
+            "/Users/luoqi/Downloads/开发服务合同.pdf",
+            "/Users/luoqi/Downloads/Add_edit direct deposit – confirmation.pdf",
         ]
         
         # 场景1: 上传多个文件
+        '''
         print("\n1. 📚 多个文件上传")
         result1 = await client.upload(
             source_paths=filenames,
@@ -771,9 +784,12 @@ async def main():
             upload_strategy=UploadStrategy.PARALLEL,
         )
         print(f"结果: {json.dumps(result1, indent=2, ensure_ascii=False)}")
-
+        '''
+        
         # 场景2: 上传目录
-        directories = ["/Users/luoqi/Downloads/math"]
+        directories = ["/Users/luoqi/Downloads/高中-数学",
+                       "/Users/luoqi/Downloads/大学",
+                       ]
         print("\n2. 📁 目录上传")
         result2 = await client.upload(
             source_paths=directories,
@@ -783,13 +799,14 @@ async def main():
             base_upload_path="test_uploads"
         )
         print(f"结果: {json.dumps(result2, indent=2, ensure_ascii=False)}")
+       
         
-        '''
         # 监控进度示例
         if result2.get('task_id'):
             print("\n3. 📊 监控上传进度")
             for i in range(3):  # 监控3次
                 progress = await client.get_task_progress(result2['task_id'])
+                print(str(progress))
                 if progress['success']:
                     data = progress['data']
                     percentage = (data['completedFiles'] / data['totalFiles']) * 100 if data['totalFiles'] > 0 else 0
@@ -797,7 +814,7 @@ async def main():
                 else:
                     print(f"进度 {i+1}: 获取失败 - {progress['error']}")
                 await asyncio.sleep(1)
-        '''
+        
 
 
 if __name__ == "__main__":

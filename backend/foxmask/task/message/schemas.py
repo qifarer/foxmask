@@ -17,6 +17,7 @@ class MessageTopicEnum(str, Enum):
     
 class MessageEventTypeEnum(str, Enum):
     """Kafka message event types"""
+    CREATE_FILE_FROM_UPLOAD = "create_file_from_upload"
     CREATE_ITEM_FROM_FILE = "create_item_from_file"
     CREATE_ITEM_FROM_CHAT = "create_item_from_chat"
     PARSE_MD_FROM_SOURCE = "parse_md_from_source"

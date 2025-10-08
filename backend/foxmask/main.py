@@ -15,10 +15,10 @@ import asyncio
 from foxmask.core.config import settings
 from foxmask.core.mongo import  connect_to_mongo, close_mongo_connection, mongodb
 from foxmask.core.kafka import kafka_manager
-from foxmask.core.scheduler import scheduler
+# from foxmask.core.scheduler import scheduler
 from foxmask.core.logger import logger
-from foxmask.task.message.consumers import task_consumer
-from foxmask.task.message.dead_letter_processor import dead_letter_processor
+#from foxmask.task.message.consumers import task_consumer
+# from foxmask.task.message.dead_letter_processor import dead_letter_processor
 from foxmask.core.middleware.error_handler import ErrorHandlerMiddleware, RateLimitMiddleware
 from foxmask.core.monitoring import monitoring_service
 
@@ -29,8 +29,8 @@ from foxmask.auth.router import router as auth_router
 #from foxmask.tag.router import router as tag_router
 #from foxmask.task.router import router as task_router
 
-from foxmask.tag.graphql import TagQuery, TagMutation
-from foxmask.task.graphql import TaskQuery, TaskMutation
+#from foxmask.tag.graphql import TagQuery, TagMutation
+# from foxmask.task.graphql import TaskQuery, TaskMutation
 
 from foxmask.file.mongo import init_file_db
 # from foxmask.file.api.routers import file_router, upload_router
@@ -45,6 +45,7 @@ from foxmask.task.message.kafka_topic import setup_kafka_topics
 from foxmask.shared.dependencies import get_context
 
 from foxmask.graphql import schema
+from foxmask.task.message.process_manager import process_manager
 
 def create_graphql_app() -> GraphQLRouter:
     """创建GraphQL路由"""
@@ -95,7 +96,7 @@ async def lifespan(app: FastAPI):
     await setup_kafka_topics()
         
     # 启动生产者
-    await kafka_manager.create_producer()
+    # await kafka_manager.create_producer()
     
     
     # Connect to Weaviate and Neo4j
@@ -106,10 +107,10 @@ async def lifespan(app: FastAPI):
     #await neo4j_client.ensure_constraints_exists()
     
     # Start task consumers
-    await task_consumer.start_consumers()
+    # await task_consumer.start_consumers()
     
     # Start scheduler
-    scheduler.start()
+    # scheduler.start()
     
     logger.info("Application started successfully")
     
@@ -122,8 +123,8 @@ async def lifespan(app: FastAPI):
     await kafka_manager.close()
     #await weaviate_client.close()
     #await neo4j_client.close()
-    await task_consumer.stop_consumers()
-    scheduler.shutdown()
+    # await task_consumer.stop_consumers()
+    # scheduler.shutdown()
     
     logger.info("Application shutdown complete")
 
@@ -169,6 +170,30 @@ async def system_status():
         uptime=time.time() - psutil.boot_time(),
         timestamp=datetime.now(timezone.utc).isoformat()
     )
+
+# 添加消息处理进程状态端点
+@app.get("/api/message-process/status")
+async def get_message_process_status():
+    """获取消息处理进程状态"""
+    return process_manager.get_process_status()
+
+@app.post("/api/message-process/start")
+async def start_message_process():
+    """启动消息处理进程"""
+    process_manager.start_consumer_process()
+    return {"message": "Message process started"}
+
+@app.post("/api/message-process/stop")
+async def stop_message_process():
+    """停止消息处理进程"""
+    process_manager.stop_consumer_process()
+    return {"message": "Message process stopped"}
+
+@app.post("/api/message-process/restart")
+async def restart_message_process():
+    """重启消息处理进程"""
+    process_manager.restart_consumer_process()
+    return {"message": "Message process restarted"}
 
 # Add metrics endpoint
 @app.get("/metrics")

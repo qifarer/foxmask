@@ -4,7 +4,7 @@
 文件管理模块 Service 包
 """
 
-from .management import FileService, FileLogService
+from .management import FileService
 from .upload import UploadService
 
 
@@ -22,14 +22,7 @@ class ServiceManager:
         if self._file_service is None:
             self._file_service = FileService()
         return self._file_service
-    
-    @property
-    def file_log_service(self) -> FileLogService:
-        """获取文件日志服务"""
-        if self._file_log_service is None:
-            self._file_log_service = FileLogService()
-        return self._file_log_service
-    
+      
     @property
     def upload_task_service(self) -> UploadService:
         """获取上传任务服务"""
@@ -53,7 +46,6 @@ def get_service_manager() -> ServiceManager:
 __all__ = [
     "ServiceManager",
     "FileService", 
-    "FileLogService",
     "UploadTaskService",
     "get_service_manager"
 ]

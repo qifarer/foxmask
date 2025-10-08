@@ -2,20 +2,22 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime
 from dataclasses import asdict
 import base64
-from foxmask.core.enums import *
-from foxmask.file.enums import *
-from foxmask.utils.helpers import get_current_timestamp,convert_upload_to_string
 
-# 导入类型
-from foxmask.file.graphql.schemas.upload import *
-# 导入DTO类型
-from foxmask.file.dtos.upload import *
+from foxmask.core.enums import *
 from foxmask.core.logger import logger
+from foxmask.file.dtos.upload import *
+from foxmask.file.enums import *
+from foxmask.file.graphql.schemas.upload import *
+from foxmask.utils.helpers import convert_upload_to_string, get_current_timestamp
+
 
 class UploadMapper:
-    """DTO和映射转换器"""
+    """DTO 和 GraphQL Schema 映射转换器"""
     
-    # Enum映射 (DTO -> )
+    # ============================
+    # Enum 映射方法 (DTO -> GraphQL)
+    # ============================
+    
     @staticmethod
     def _map_proc_status_enum(dto_enum: Optional[UploadProcStatusEnum]):
         """处理状态枚举映射"""
@@ -105,7 +107,10 @@ class UploadMapper:
         }
         return mapping.get(dto_enum, VisibilityEnum.PUBLIC)
 
-    # 反向Enum映射 ( -> DTO)
+    # ============================
+    # 反向 Enum 映射 (GraphQL -> DTO)
+    # ============================
+    
     @staticmethod
     def _map_proc_status_enum_reverse(schema_enum):
         """处理状态枚举反向映射"""
@@ -195,7 +200,10 @@ class UploadMapper:
         }
         return mapping.get(schema_enum, Visibility.PUBLIC)
 
-    # DTO ->  转换方法
+    # ============================
+    # DTO -> GraphQL Schema 转换方法
+    # ============================
+    
     @staticmethod
     def error_dto_to_schema(dto: ErrorDTO) -> Error:
         """ErrorDTO 转 Error"""
@@ -397,7 +405,10 @@ class UploadMapper:
             progress=dto.progress
         )
 
-    #  -> DTO 转换方法
+    # ============================
+    # GraphQL Schema -> DTO 转换方法
+    # ============================
+    
     @staticmethod
     def upload_task_file_chunk_schema_to_dto(schema: UploadTaskFileChunk) -> UploadTaskFileChunkDTO:
         """UploadTaskFileChunk 转 UploadTaskFileChunkDTO"""
@@ -511,21 +522,22 @@ class UploadMapper:
             files=files
         )
 
+    # ============================
     # 响应类型转换
+    # ============================
+    
     @staticmethod
     def base_response_dto_to_schema(dto: BaseResponseDTO, data_field: str = None, data_value=None):
-        """BaseResponseDTO 转 BaseResponse """
+        """BaseResponseDTO 转 BaseResponse"""
         errors = None
         if dto.errors:
             errors = [UploadMapper.error_dto_to_schema(error) for error in dto.errors]
         
-        # 创建基础的响应对象
         response_data = {
             "success": dto.success,
             "errors": errors
         }
         
-        # 添加数据字段
         if data_field and data_value is not None:
             response_data[data_field] = data_value
         
@@ -539,8 +551,6 @@ class UploadMapper:
             data = UploadMapper.upload_task_dto_to_schema(dto.data)
         
         base_data = UploadMapper.base_response_dto_to_schema(dto, "data", data)
-        print('======initialize_upload===333333===')
-        print(str(base_data))
         return InitializeUploadResponse(**base_data)
     
     @staticmethod
@@ -644,7 +654,10 @@ class UploadMapper:
         base_data = UploadMapper.base_response_dto_to_schema(dto, "data", data)
         return UploadProgressResponse(**base_data)
 
-    # 输入类型转换 ( Input -> DTO)
+    # ============================
+    # 输入类型转换 (GraphQL Input -> DTO)
+    # ============================
+    
     @staticmethod
     def initialize_upload_input_to_dto(input_data, tenant_id: str = None, created_by: str = None) -> InitializeUploadInputDTO:
         """InitializeUploadInput 转 InitializeUploadInputDTO"""
@@ -688,14 +701,13 @@ class UploadMapper:
     def upload_chunk_input_to_dto(input_data, tenant_id: str = None) -> UploadChunkInputDTO:
         """UploadChunkInput 转 UploadChunkInputDTO - 处理 Upload 类型"""
         try:
-           
             chunk_data_str = convert_upload_to_string(input_data.chunk_data)
             return UploadChunkInputDTO(
                 tenant_id=tenant_id,
                 task_id=input_data.task_id,
                 file_id=input_data.file_id,
                 chunk_number=input_data.chunk_number,
-                chunk_data=chunk_data_str,  # ✅ 现在是 base64 字符串
+                chunk_data=chunk_data_str,
                 chunk_size=input_data.chunk_size,
                 start_byte=input_data.start_byte,
                 end_byte=input_data.end_byte,
@@ -707,7 +719,7 @@ class UploadMapper:
                 max_retries=input_data.max_retries
             )
         except Exception as e:
-            logger.error(f"Failed to convert UploadChunkInput to DTO: {e}")
+            logger.error(f"转换 UploadChunkInput 到 DTO 失败: {e}")
             raise
     
     @staticmethod
@@ -766,7 +778,10 @@ class UploadMapper:
             proc_status=UploadMapper._map_proc_status_enum_reverse(input_data.proc_status) if input_data.proc_status else None
         )
 
+    # ============================
     # 批量转换方法
+    # ============================
+    
     @staticmethod
     def upload_task_dto_list_to_schema(dto_list: List[UploadTaskDTO]) -> List[UploadTask]:
         """UploadTaskDTO 列表转 UploadTask 列表"""
@@ -782,7 +797,6 @@ class UploadMapper:
         """UploadTaskFileChunkDTO 列表转 UploadTaskFileChunk 列表"""
         return [UploadMapper.upload_task_file_chunk_dto_to_schema(dto) for dto in dto_list]
 
-    # 反向批量转换
     @staticmethod
     def upload_task_schema_list_to_dto(schema_list: List[UploadTask]) -> List[UploadTaskDTO]:
         """UploadTask 列表转 UploadTaskDTO 列表"""

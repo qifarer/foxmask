@@ -1,11 +1,11 @@
 # foxmask/file/repositories/upload.py
-from typing import List, Optional, Dict, Any, Tuple
-from beanie import PydanticObjectId
 from datetime import datetime, timezone
+from typing import List, Optional, Dict, Any, Tuple
 
-from foxmask.file.models.upload import UploadTask, UploadTaskFile, UploadTaskFileChunk
-from foxmask.file.enums import FileTypeEnum, UploadProcStatusEnum
 from foxmask.core.logger import logger
+from foxmask.file.enums import FileTypeEnum, UploadProcStatusEnum
+from foxmask.file.models.upload import UploadTask, UploadTaskFile, UploadTaskFileChunk
+
 
 class UploadTaskRepository:
     """上传任务仓库"""
@@ -13,20 +13,21 @@ class UploadTaskRepository:
     def __init__(self):
         self.model = UploadTask
     
-    # 基础CRUD操作
+    # ==================== 基础CRUD操作 ====================
+    
     async def create(self, task: UploadTask) -> UploadTask:
-        """创建任务"""
+        """创建上传任务"""
         return await task.insert()
     
     async def get_by_id(self, task_id: str) -> Optional[UploadTask]:
-        """根据ID获取任务"""
+        """根据ID获取上传任务"""
         return await self.model.find_one({"uid": task_id})
     
     async def update(self, task_id: str, update_data: Dict[str, Any]) -> Optional[UploadTask]:
-        """更新任务 - 修复DTO处理"""
+        """更新上传任务"""
         task = await self.get_by_id(task_id)
         if task:
-            # ✅ 修复：检查是否是DTO对象，如果是则转换为字典
+            # 处理DTO对象转换
             if hasattr(update_data, 'dict'):
                 # 如果是Pydantic模型
                 update_data = update_data.dict(exclude_unset=True)
@@ -40,17 +41,15 @@ class UploadTaskRepository:
                         update_dict[field.name] = value
                 update_data = update_dict
             
-            # 现在update_data应该是字典，可以安全使用items()
+            # 更新字段
             for key, value in update_data.items():
                 setattr(task, key, value)
             await task.save()
             return task
         return None
     
-    
-
     async def delete(self, task_id: str) -> bool:
-        """删除任务"""
+        """删除上传任务"""
         task = await self.get_by_id(task_id)
         if task:
             await task.delete()
@@ -58,10 +57,11 @@ class UploadTaskRepository:
         return False
     
     async def bulk_create(self, tasks: List[UploadTask]) -> List[UploadTask]:
-        """批量创建任务"""
+        """批量创建上传任务"""
         return await self.model.insert_many(tasks)
     
-    # 查询方法 - 修正以匹配服务代码调用
+    # ==================== 查询方法 ====================
+    
     async def list(
         self,
         filters: Dict[str, Any] = None,
@@ -70,7 +70,7 @@ class UploadTaskRepository:
         sort_by: Optional[str] = None,
         sort_order: str = "desc"
     ) -> Tuple[List[UploadTask], int]:
-        """分页查询任务列表 - 匹配服务代码调用"""
+        """分页查询上传任务列表"""
         query = {}
         if filters:
             query.update(filters)
@@ -100,7 +100,7 @@ class UploadTaskRepository:
         page: int = 1,
         page_size: int = 20
     ) -> List[UploadTask]:
-        """根据过滤器获取任务"""
+        """根据过滤器获取上传任务"""
         skip = (page - 1) * page_size
         query = {"tenant_id": tenant_id}
         
@@ -116,7 +116,7 @@ class UploadTaskRepository:
         page: int = 1, 
         page_size: int = 20
     ) -> List[UploadTask]:
-        """根据租户和状态获取任务"""
+        """根据租户和状态获取上传任务"""
         return await self.get_by_filters(
             tenant_id=tenant_id,
             filters={"proc_status": status},
@@ -124,14 +124,15 @@ class UploadTaskRepository:
             page_size=page_size
         )
     
-    # 业务方法
+    # ==================== 业务方法 ====================
+    
     async def update_task_status(
         self, 
         task_id: str, 
         status: UploadProcStatusEnum,
         **updates
     ) -> Optional[UploadTask]:
-        """更新任务状态"""
+        """更新上传任务状态"""
         update_data = {"proc_status": status}
         update_data.update(updates)
         return await self.update(task_id, update_data)
@@ -145,7 +146,7 @@ class UploadTaskRepository:
         processing_files: int = 0,
         discovered_files: int = 0
     ) -> Optional[UploadTask]:
-        """增量更新任务进度 - 添加新字段支持"""
+        """增量更新上传任务进度"""
         task = await self.get_by_id(task_id)
         if task:
             update_data = {}
@@ -178,16 +179,39 @@ class UploadTaskRepository:
             }
         )
     
-    # 统计方法 - 添加服务代码需要的方法
+    async def cancel_upload_task(self, task_id: str) -> Optional[UploadTask]:
+        """取消上传任务"""
+        return await self.update_task_status(task_id, UploadProcStatusEnum.CANCELLED)
+    
+    async def update_discovery_progress(
+        self,
+        task_id: str,
+        discovered_files: int = 0,
+        total_files: int = 0,
+        total_size: int = 0
+    ) -> Optional[UploadTask]:
+        """更新文件发现进度"""
+        update_data = {}
+        if discovered_files is not None:
+            update_data["discovered_files"] = discovered_files
+        if total_files is not None:
+            update_data["total_files"] = total_files
+        if total_size is not None:
+            update_data["total_size"] = total_size
+            
+        return await self.update(task_id, update_data)
+    
+    # ==================== 统计方法 ====================
+    
     async def count(self, filters: Dict[str, Any] = None) -> int:
-        """统计任务数量"""
+        """统计上传任务数量"""
         query = {}
         if filters:
             query.update(filters)
         return await self.model.find(query).count()
     
     async def get_task_stats(self, tenant_id: str, created_by: Optional[str] = None) -> Dict[str, Any]:
-        """获取任务统计信息 - 修复聚合查询"""
+        """获取上传任务统计信息"""
         match_stage = {"tenant_id": tenant_id}
         if created_by:
             match_stage["created_by"] = created_by
@@ -202,13 +226,12 @@ class UploadTaskRepository:
             }}
         ]
         
-        # ✅ 修复：直接调用 to_list()
         result = await self.model.aggregate(pipeline).to_list()
         return {item["_id"]: item for item in result}
     
     async def get_stats(self, tenant_id: str, created_by: Optional[str] = None) -> Dict[str, Any]:
-        """获取上传统计 - 服务代码需要的方法"""
-        # 实现统计逻辑，返回服务代码需要的字段
+        """获取上传统计信息"""
+        # 统计任务数量
         total_tasks = await self.count({"tenant_id": tenant_id})
         active_tasks = await self.count({
             "tenant_id": tenant_id,
@@ -236,7 +259,6 @@ class UploadTaskRepository:
             }}
         ]
         
-        # ✅ 修复：直接调用 to_list()
         size_result = await self.model.aggregate(pipeline).to_list()
         total_files = size_result[0]["total_files"] if size_result else 0
         total_size = size_result[0]["total_size"] if size_result else 0
@@ -252,29 +274,7 @@ class UploadTaskRepository:
             "uploaded_size": uploaded_size,
             "progress": (uploaded_size / total_size * 100) if total_size > 0 else 0
         }
-    
-    async def cancel_upload_task(self, task_id: str) -> Optional[UploadTask]:
-        """取消上传任务"""
-        return await self.update_task_status(task_id, UploadProcStatusEnum.CANCELLED)
-    
-    # 新增方法：更新发现进度
-    async def update_discovery_progress(
-        self,
-        task_id: str,
-        discovered_files: int = 0,
-        total_files: int = 0,
-        total_size: int = 0
-    ) -> Optional[UploadTask]:
-        """更新文件发现进度"""
-        update_data = {}
-        if discovered_files is not None:
-            update_data["discovered_files"] = discovered_files
-        if total_files is not None:
-            update_data["total_files"] = total_files
-        if total_size is not None:
-            update_data["total_size"] = total_size
-            
-        return await self.update(task_id, update_data)
+
 
 class UploadTaskFileRepository:
     """上传任务文件仓库"""
@@ -282,17 +282,18 @@ class UploadTaskFileRepository:
     def __init__(self):
         self.model = UploadTaskFile
     
-    # 基础CRUD操作
+    # ==================== 基础CRUD操作 ====================
+    
     async def create(self, file: UploadTaskFile) -> UploadTaskFile:
-        """创建文件"""
+        """创建上传任务文件"""
         return await file.insert()
     
     async def get_by_id(self, file_id: str) -> Optional[UploadTaskFile]:
-        """根据ID获取文件"""
+        """根据ID获取上传任务文件"""
         return await self.model.find_one({"uid": file_id})
     
     async def update(self, file_id: str, update_data: Dict[str, Any]) -> Optional[UploadTaskFile]:
-        """更新文件"""
+        """更新上传任务文件"""
         file = await self.get_by_id(file_id)
         if file:
             for key, value in update_data.items():
@@ -302,7 +303,7 @@ class UploadTaskFileRepository:
         return None
     
     async def delete(self, file_id: str) -> bool:
-        """删除文件"""
+        """删除上传任务文件"""
         file = await self.get_by_id(file_id)
         if file:
             await file.delete()
@@ -310,7 +311,7 @@ class UploadTaskFileRepository:
         return False
     
     async def bulk_create(self, files: List[UploadTaskFile]) -> List[UploadTaskFile]:
-        """批量创建文件"""
+        """批量创建上传任务文件"""
         if not files:
             return []
         try:
@@ -320,10 +321,11 @@ class UploadTaskFileRepository:
                 entity.id = inserted_id
             return files
         except Exception as e:
-            logger.error(f"bulk_create failed: {e}")
+            logger.error(f"批量创建上传任务文件失败: {e}")
             raise
     
-    # 查询方法 - 修正以匹配服务代码调用
+    # ==================== 查询方法 ====================
+    
     async def list_by_task(
         self, 
         task_id: str,
@@ -333,7 +335,7 @@ class UploadTaskFileRepository:
         page: int = 1,
         page_size: int = 50
     ) -> List[UploadTaskFile]:
-        """根据任务ID获取文件 - 匹配服务代码调用"""
+        """根据任务ID获取上传任务文件"""
         skip = (page - 1) * page_size
         query = {"master_id": task_id}
         
@@ -354,7 +356,7 @@ class UploadTaskFileRepository:
         sort_by: Optional[str] = None,
         sort_order: str = "desc"
     ) -> Tuple[List[UploadTaskFile], int]:
-        """分页查询文件列表 - 匹配服务代码调用"""
+        """分页查询上传任务文件列表"""
         # 构建查询
         find_query = self.model.find(filters)
         
@@ -380,7 +382,7 @@ class UploadTaskFileRepository:
         page: int = 1, 
         page_size: int = 50
     ) -> List[UploadTaskFile]:
-        """根据任务ID获取文件"""
+        """根据任务ID获取上传任务文件"""
         skip = (page - 1) * page_size
         query = {"master_id": task_id}
         
@@ -389,7 +391,15 @@ class UploadTaskFileRepository:
         
         return await self.model.find(query).skip(skip).limit(page_size).to_list()
     
-    # 业务方法
+    async def get_by_original_path(self, task_id: str, original_path: str) -> Optional[UploadTaskFile]:
+        """根据原始路径获取上传任务文件"""
+        return await self.model.find_one({
+            "master_id": task_id,
+            "original_path": original_path
+        })
+    
+    # ==================== 业务方法 ====================
+    
     async def update_file_progress(
         self,
         file_id: str,
@@ -440,9 +450,17 @@ class UploadTaskFileRepository:
             error_info=error_info
         )
     
-    # 统计方法 - 添加服务代码需要的方法
+    async def get_files_by_status(self, task_id: str, status: UploadProcStatusEnum) -> List[UploadTaskFile]:
+        """根据状态获取上传任务文件"""
+        return await self.get_by_task_id(
+            task_id=task_id,
+            filters={"proc_status": status}
+        )
+    
+    # ==================== 统计方法 ====================
+    
     async def count(self, filters: Dict[str, Any] = None) -> int:
-        """统计文件数量"""
+        """统计上传任务文件数量"""
         query = {}
         if filters:
             query.update(filters)
@@ -463,7 +481,7 @@ class UploadTaskFileRepository:
         })
     
     async def get_stats_by_task(self, task_id: str) -> Dict[str, Any]:
-        """获取任务的文件统计信息 - 修复浮点数问题"""
+        """获取任务的文件统计信息"""
         try:
             # 获取所有相关文件
             files = await self.model.find({"master_id": task_id}).to_list()
@@ -474,15 +492,15 @@ class UploadTaskFileRepository:
                 "failed_files": 0,
                 "processing_files": 0,
                 "total_size": 0,
-                "uploaded_size": 0  # 这个字段需要是整数
+                "uploaded_size": 0
             }
             
             for file in files:
                 stats["total_size"] += file.file_size
                 
-                # ✅ 修复：将浮点数转换为整数
+                # 计算已上传大小
                 uploaded_file_size = file.file_size * (file.progress / 100)
-                stats["uploaded_size"] += int(uploaded_file_size)  # 转换为整数
+                stats["uploaded_size"] += int(uploaded_file_size)
                 
                 # 根据状态统计
                 if file.proc_status == UploadProcStatusEnum.COMPLETED:
@@ -496,11 +514,11 @@ class UploadTaskFileRepository:
                 ]:
                     stats["processing_files"] += 1
             
-            logger.debug(f"Task {task_id} stats: {stats}")
+            logger.debug(f"任务 {task_id} 统计: {stats}")
             return stats
                 
         except Exception as e:
-            logger.error(f"Failed to get task stats for {task_id}: {e}")
+            logger.error(f"获取任务 {task_id} 统计失败: {e}")
             return {
                 "total_files": 0,
                 "completed_files": 0,
@@ -509,22 +527,7 @@ class UploadTaskFileRepository:
                 "total_size": 0,
                 "uploaded_size": 0
             }
-    
-        
-    async def get_files_by_status(self, task_id: str, status: UploadProcStatusEnum) -> List[UploadTaskFile]:
-        """根据状态获取文件"""
-        return await self.get_by_task_id(
-            task_id=task_id,
-            filters={"proc_status": status}
-        )
-    
-    # 新增方法：根据文件路径查询
-    async def get_by_original_path(self, task_id: str, original_path: str) -> Optional[UploadTaskFile]:
-        """根据原始路径获取文件"""
-        return await self.model.find_one({
-            "master_id": task_id,
-            "original_path": original_path
-        })
+
 
 class UploadTaskFileChunkRepository:
     """上传任务文件分块仓库"""
@@ -532,17 +535,18 @@ class UploadTaskFileChunkRepository:
     def __init__(self):
         self.model = UploadTaskFileChunk
     
-    # 基础CRUD操作
+    # ==================== 基础CRUD操作 ====================
+    
     async def create(self, chunk: UploadTaskFileChunk) -> UploadTaskFileChunk:
-        """创建分块"""
+        """创建文件分块"""
         return await chunk.insert()
     
     async def get_by_id(self, chunk_id: str) -> Optional[UploadTaskFileChunk]:
-        """根据ID获取分块"""
+        """根据ID获取文件分块"""
         return await self.model.find_one({"uid": chunk_id})
     
     async def update(self, chunk_id: str, update_data: Dict[str, Any]) -> Optional[UploadTaskFileChunk]:
-        """更新分块"""
+        """更新文件分块"""
         chunk = await self.get_by_id(chunk_id)
         if chunk:
             for key, value in update_data.items():
@@ -552,7 +556,7 @@ class UploadTaskFileChunkRepository:
         return None
     
     async def delete(self, chunk_id: str) -> bool:
-        """删除分块"""
+        """删除文件分块"""
         chunk = await self.get_by_id(chunk_id)
         if chunk:
             await chunk.delete()
@@ -560,26 +564,24 @@ class UploadTaskFileChunkRepository:
         return False
     
     async def bulk_create(self, chunks: List[UploadTaskFileChunk]) -> List[UploadTaskFileChunk]:
-        """批量创建分块"""
+        """批量创建文件分块"""
         return await self.model.insert_many(chunks)
     
-    # 查询方法 - 添加服务代码需要的方法
+    # ==================== 查询方法 ====================
+    
     async def get_by_file_and_number(
         self, 
         file_id: str, 
         chunk_number: int
     ) -> Optional[UploadTaskFileChunk]:
-        """获取特定分块 - 服务代码需要的方法"""
+        """根据文件和分块编号获取文件分块"""
         return await self.model.find_one({
             "file_id": file_id,
             "chunk_number": chunk_number
         })
     
-    async def list_by_file(
-        self, 
-        file_id: str
-    ) -> List[UploadTaskFileChunk]:
-        """根据文件ID获取分块"""
+    async def list_by_file(self, file_id: str) -> List[UploadTaskFileChunk]:
+        """根据文件ID获取文件分块列表"""
         return await self.model.find({"file_id": file_id}).sort("chunk_number").to_list()
     
     async def get_chunk(
@@ -587,13 +589,21 @@ class UploadTaskFileChunkRepository:
         file_id: str, 
         chunk_number: int
     ) -> Optional[UploadTaskFileChunk]:
-        """获取特定分块"""
+        """获取特定文件分块"""
         return await self.model.find_one({
             "file_id": file_id,
             "chunk_number": chunk_number
         })
     
-    # 业务方法
+    async def get_pending_chunks(self, file_id: str, limit: int = 10) -> List[UploadTaskFileChunk]:
+        """获取待处理的文件分块"""
+        return await self.model.find({
+            "file_id": file_id,
+            "proc_status": UploadProcStatusEnum.PENDING
+        }).sort("chunk_number").limit(limit).to_list()
+    
+    # ==================== 业务方法 ====================
+    
     async def update_chunk_status(
         self,
         file_id: str,
@@ -603,7 +613,7 @@ class UploadTaskFileChunkRepository:
         checksum_md5: Optional[str] = None,
         checksum_sha256: Optional[str] = None
     ) -> Optional[UploadTaskFileChunk]:
-        """更新分块状态"""
+        """更新文件分块状态"""
         chunk = await self.get_chunk(file_id, chunk_number)
         if chunk:
             update_data = {"proc_status": status}
@@ -627,7 +637,7 @@ class UploadTaskFileChunkRepository:
         checksum_md5: str,
         checksum_sha256: str
     ) -> Optional[UploadTaskFileChunk]:
-        """标记分块完成"""
+        """标记文件分块完成"""
         return await self.update_chunk_status(
             file_id,
             chunk_number,
@@ -637,16 +647,17 @@ class UploadTaskFileChunkRepository:
             checksum_sha256=checksum_sha256
         )
     
-    # 统计方法 - 添加服务代码需要的方法
+    # ==================== 统计方法 ====================
+    
     async def count(self, filters: Dict[str, Any] = None) -> int:
-        """统计分块数量"""
+        """统计文件分块数量"""
         query = {}
         if filters:
             query.update(filters)
         return await self.model.find(query).count()
     
     async def count_by_file(self, file_id: str) -> int:
-        """统计文件的分块数量 - 服务代码需要的方法"""
+        """统计文件的分块数量"""
         return await self.count({"file_id": file_id})
     
     async def get_completed_chunks_count(self, file_id: str) -> int:
@@ -662,13 +673,3 @@ class UploadTaskFileChunkRepository:
             "file_id": file_id,
             "proc_status": UploadProcStatusEnum.FAILED
         })
-    
-    # 新增方法：获取待处理的分块
-    async def get_pending_chunks(self, file_id: str, limit: int = 10) -> List[UploadTaskFileChunk]:
-        """获取待处理的分块"""
-        return await self.model.find({
-            "file_id": file_id,
-            "proc_status": UploadProcStatusEnum.PENDING
-        }).sort("chunk_number").limit(limit).to_list()
-    
-    

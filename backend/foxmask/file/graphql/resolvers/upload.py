@@ -2,16 +2,13 @@ import strawberry
 from strawberry.types import Info
 from typing import Optional, List
 
-from foxmask.file.graphql.schemas.enums import *
-from foxmask.file.graphql.schemas.upload import *
+from foxmask.core.logger import logger
 from foxmask.core.schema import *
 from foxmask.file.dtos.upload import *
-
-from foxmask.file.services import get_service_manager
-from foxmask.core.logger import logger
-
-# 使用统一的映射器
 from foxmask.file.graphql.mappers.upload import UploadMapper
+from foxmask.file.graphql.schemas.enums import *
+from foxmask.file.graphql.schemas.upload import *
+from foxmask.file.services import get_service_manager
 
 
 # GraphQL Resolver
@@ -28,8 +25,6 @@ class UploadMutation:
     ) -> InitializeUploadResponse:
         """初始化上传任务"""
         try:
-            print('======initialize_upload===000000===')
-            print(str(input))
             user_id = info.context.get("user_id", "SYSTEM")
             tenant_id = info.context.get("tenant_id", "foxmask")
             
@@ -39,15 +34,15 @@ class UploadMutation:
                 tenant_id=tenant_id, 
                 created_by=user_id
             )
-            print('======initialize_upload===111111===')
+            
             # 调用服务层
             response_dto = await self.service.initialize_upload(input_dto)
-            print('======initialize_upload===222222===')
+            
             # 使用统一的映射器转换响应
             return UploadMapper.initialize_upload_response_dto_to_schema(response_dto)
             
         except Exception as e:
-            logger.error(f"Initialize upload failed: {e}")
+            logger.error(f"初始化上传任务失败: {e}")
             return InitializeUploadResponse(
                 success=False,
                 errors=[Error(message=f"初始化上传任务失败: {str(e)}", code="INTERNAL_ERROR")],
@@ -63,7 +58,7 @@ class UploadMutation:
     ) -> UploadChunkResponse:
         """上传文件块"""
         try:
-            logger.info(f"GraphQL upload_chunk called, chunk_data type: {type(input.chunk_data)}")
+            logger.info(f"GraphQL upload_chunk 被调用, chunk_data 类型: {type(input.chunk_data)}")
             
             tenant_id = info.context.get("tenant_id", "foxmask")
             
@@ -77,7 +72,7 @@ class UploadMutation:
             return UploadMapper.upload_chunk_response_dto_to_schema(response_dto)
             
         except Exception as e:
-            logger.error(f"Upload chunk failed: {e}")
+            logger.error(f"上传文件块失败: {e}")
             return UploadChunkResponse(
                 success=False,
                 errors=[Error(message=f"上传文件块失败: {str(e)}", code="INTERNAL_ERROR")],
@@ -102,7 +97,7 @@ class UploadMutation:
             return UploadMapper.complete_upload_response_dto_to_schema(response_dto)
             
         except Exception as e:
-            logger.error(f"Complete upload failed: {e}")
+            logger.error(f"完成上传失败: {e}")
             return CompleteUploadResponse(
                 success=False,
                 errors=[Error(message=f"完成上传失败: {str(e)}", code="INTERNAL_ERROR")],
@@ -134,7 +129,7 @@ class UploadMutation:
             return UploadMapper.resume_upload_response_dto_to_schema(response_dto)
             
         except Exception as e:
-            logger.error(f"Resume upload failed: {e}")
+            logger.error(f"恢复上传失败: {e}")
             return ResumeUploadResponse(
                 success=False,
                 errors=[Error(message=f"恢复上传失败: {str(e)}", code="INTERNAL_ERROR")],
@@ -158,13 +153,13 @@ class UploadQuery:
             tenant_id = info.context.get("tenant_id", "foxmask")
             
             # 调用服务层
-            response_dto = await self.service.get_upload_task(task_id, tenant_id)
+            response_dto = await self.service.get_upload_task(task_id)
             
             # 使用统一的映射器转换响应
             return UploadMapper.get_upload_task_response_dto_to_schema(response_dto)
             
         except Exception as e:
-            logger.error(f"Get upload task failed: {e}")
+            logger.error(f"获取上传任务失败: {e}")
             return GetUploadTaskResponse(
                 success=False,
                 errors=[Error(message=f"获取上传任务失败: {str(e)}", code="INTERNAL_ERROR")],
@@ -212,7 +207,7 @@ class UploadQuery:
             return UploadMapper.list_upload_tasks_response_dto_to_schema(response_dto)
             
         except Exception as e:
-            logger.error(f"List upload tasks failed: {e}")
+            logger.error(f"查询上传任务列表失败: {e}")
             return ListUploadTasksResponse(
                 success=False,
                 errors=[Error(message=f"查询上传任务列表失败: {str(e)}", code="INTERNAL_ERROR")],
@@ -258,7 +253,7 @@ class UploadQuery:
             return UploadMapper.list_upload_task_files_response_dto_to_schema(response_dto)
             
         except Exception as e:
-            logger.error(f"List upload task files failed: {e}")
+            logger.error(f"查询上传任务文件列表失败: {e}")
             return ListUploadTaskFilesResponse(
                 success=False,
                 errors=[Error(message=f"查询上传任务文件列表失败: {str(e)}", code="INTERNAL_ERROR")],
@@ -304,7 +299,7 @@ class UploadQuery:
             return UploadMapper.list_upload_task_file_chunks_response_dto_to_schema(response_dto)
             
         except Exception as e:
-            logger.error(f"List upload task file chunks failed: {e}")
+            logger.error(f"查询文件分块列表失败: {e}")
             return ListUploadTaskFileChunksResponse(
                 success=False,
                 errors=[Error(message=f"查询文件分块列表失败: {str(e)}", code="INTERNAL_ERROR")],
@@ -340,7 +335,7 @@ class UploadQuery:
             return UploadMapper.upload_progress_response_dto_to_schema(base_response, progress_dto)
             
         except Exception as e:
-            logger.error(f"Get upload progress failed: {e}")
+            logger.error(f"获取上传进度失败: {e}")
             return UploadProgressResponse(
                 success=False,
                 errors=[Error(message=f"获取上传进度失败: {str(e)}", code="INTERNAL_ERROR")],

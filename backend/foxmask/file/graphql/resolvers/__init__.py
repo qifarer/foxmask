@@ -4,13 +4,12 @@
 文件管理模块 GraphQL Resolvers 包
 """
 
-from .management import FileQuery, FileMutation, FileUploadMutation
+from .management import FileQuery, FileMutation
 from .upload import UploadQuery, UploadMutation
 
 __all__ = [
     "FileQuery",
     "FileMutation",
-    "FileUploadMutation",
     "UploadQuery",
     "UploadMutation",
 ]

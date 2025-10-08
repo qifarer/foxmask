@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional
 import json
 from bson import ObjectId
 import base64
-import re
+import re, os
 from foxmask.core.logger import logger
 
 def generate_uuid() -> str:
@@ -18,6 +18,9 @@ def generate_uuid() -> str:
 def generate_short_id() -> str:
     """Generate a short unique ID"""
     return uuid.uuid4().hex[:8]
+
+def get_today_str(fmt="%Y%m%d"):
+    return datetime.now().strftime(fmt)
 
 def get_current_time() -> datetime:
     """Get current UTC time"""
@@ -106,15 +109,111 @@ def format_file_size(size_bytes: int) -> str:
     
     return f"{size_bytes:.2f} {size_names[i]}"
 
+def generate_storage_path(
+    access: str, 
+    base_path: str, 
+    tenant_id: str, 
+    file_name: str, 
+) -> str:
+    """
+    生成 MinIO 存储路径
+    路径格式示例：
+        public/{tenant_id}/{base_path}/{YYYYMMDD}/{file_id}{file_extension}
+        private/{tenant_id}/{base_path}/{YYYYMMDD}/{file_id}{file_extension}
+    """
+    # 访问级别校验
+    if access not in ("public", "private"):
+        raise ValueError("access 参数必须为 'public' 或 'private'")
+    
+    # 业务目录校验
+    ALLOWED_BASE_PATHS = ("file", "chat", "product", "web", "other")
+    if base_path not in ALLOWED_BASE_PATHS:
+        raise ValueError(f"base_path 参数必须为 {ALLOWED_BASE_PATHS} 之一")
+
+    if not tenant_id:
+        raise ValueError("tenant_id 不能为空")
+    if not file_name:
+        raise ValueError("file_name 不能为空")
+   
+    today_str = get_today_str()
+    
+    storage_path = f"{access}/{tenant_id}/{base_path}/{today_str}/{file_name}"
+    return storage_path
+
+
+def extract_relative_path(full_path: str) -> str:
+    """从完整路径中提取相对路径部分 - 兼容 Windows 和 macOS"""
+    if not full_path:
+        return ""
+    
+    # 统一使用正斜杠
+    path = full_path.replace('\\', '/')
+    
+    # 处理 Windows 绝对路径 (C:\Users\... 或 \\server\share\...)
+    if re.match(r'^[a-zA-Z]:/', path):  # Windows 盘符路径
+        # 移除盘符部分 (C:/Users/... -> Users/...)
+        path = '/'.join(path.split('/')[1:])
+    elif path.startswith('//') or path.startswith('\\\\'):  # Windows 网络路径
+        # 移除网络路径前缀 (//server/share/... -> share/...)
+        path = '/'.join(path.split('/')[2:])
+    
+    # 处理 Unix/Mac 绝对路径
+    elif path.startswith('/'):
+        # 对于绝对路径，我们只保留最后几级目录，避免过深的路径
+        path_parts = path.split('/')
+        # 保留最后3级目录（可根据需要调整）
+        if len(path_parts) > 3:
+            path_parts = path_parts[-3:]
+        path = '/'.join([part for part in path_parts if part])  # 移除空部分
+    
+    # 移除常见的系统目录前缀
+    common_prefixes = [
+        'Users/', 'home/', 'Documents/', 'Downloads/', 'Desktop/',
+        'tmp/', 'temp/', 'var/tmp/'
+    ]
+    
+    for prefix in common_prefixes:
+        if path.startswith(prefix):
+            path = path[len(prefix):]
+            break
+    
+    return path
+
+@staticmethod
 def sanitize_filename(filename: str) -> str:
-    """Sanitize filename to remove unsafe characters"""
-    # Remove directory traversal attempts
-    filename = filename.replace("../", "").replace("./", "")
-    # Remove unsafe characters
-    filename = "".join(c for c in filename if c.isalnum() or c in "._- ")
-    # Replace spaces with underscores
-    filename = filename.replace(" ", "_")
-    return filename
+    """清理文件名，移除非法字符和路径信息"""
+    if not filename:
+        return "unnamed_file"
+    
+    # 提取纯文件名（移除路径）
+    clean_name = os.path.basename(filename)
+    
+    # MinIO/S3 不允许的字符：\ { } ^ % ` [ ] " > < ~ # | 
+    # 替换这些字符为下划线
+    illegal_chars = r'[\\{}^%`\[\]"<>~#|]'
+    clean_name = re.sub(illegal_chars, '_', clean_name)
+    
+    # 可选：替换空格为下划线（根据需求决定）
+    # clean_name = clean_name.replace(' ', '_')
+    
+    # 移除连续的下划线
+    clean_name = re.sub(r'_+', '_', clean_name)
+    
+    # 移除开头和结尾的特殊字符
+    clean_name = clean_name.strip('_.-')
+    
+    # 如果名称为空，使用默认名称
+    if not clean_name:
+        clean_name = "unnamed_file"
+    
+    # 限制文件名长度（避免过长的对象名称）
+    if len(clean_name) > 255:
+        name, ext = os.path.splitext(clean_name)
+        clean_name = name[:255-len(ext)] + ext
+    
+    return clean_name
+
+    
 
 def generate_presigned_url_expiry(minutes: int = 60) -> int:
     """Generate expiry time for presigned URLs"""

@@ -1,344 +1,363 @@
-# -*- coding: utf-8 -*-
-# foxmask/file/repository/file_repository.py
 from typing import List, Optional, Dict, Any, Tuple
 from datetime import datetime
-from beanie.operators import In, Eq, GTE, LTE, RegEx, And
-from pymongo import ASCENDING, DESCENDING
-
-from foxmask.core.mongo import mongodb
+from beanie import PydanticObjectId
+from beanie.operators import And, Or, In, RegEx, GTE, LTE
 from foxmask.file.models.management import File, FileLog
-from foxmask.file.enums import FileTypeEnum, UploadProcStatusEnum
-
+from foxmask.core.enums import Status
+from foxmask.file.enums import FileTypeEnum, FileProcStatusEnum
+from foxmask.utils.helpers import get_current_timestamp
 
 class FileRepository:
-    """文件数据仓库 - 直接数据操作"""
+    """文件仓库类 - 专注于File模型的数据操作"""
     
-    def __init__(self):
-        self.database = mongodb.database
-    
-    async def get_by_id(self, file_id: str) -> Optional[File]:
-        """根据ID获取文件"""
-        return await File.get(file_id)
-    
-    async def get_by_uid(self, uid: str) -> Optional[File]:
-        """根据UID获取文件"""
-        return await File.find_one(File.uid == uid)
-    
-    async def get_by_filename(self, tenant_id: str, filename: str) -> Optional[File]:
-        """根据文件名获取文件"""
-        return await File.find_one(
-            And(
-                Eq(File.tenant_id, tenant_id),
-                Eq(File.original_filename, filename)
-            )
-        )
-    
-    async def get_by_storage_key(self, tenant_id: str, storage_key: str) -> Optional[File]:
-        """根据存储键获取文件"""
-        return await File.find_one(
-            And(
-                Eq(File.tenant_id, tenant_id),
-                Eq(File.storage_key, storage_key)
-            )
-        )
-    
-    async def create_file(self, file_data: Dict[str, Any]) -> File:
-        """创建新文件"""
-        file = File(**file_data)
+    async def create(self, file: File) -> File:
+        """创建文件记录"""
         await file.insert()
         return file
     
-    async def update_file(self, file_id: str, update_data: Dict[str, Any]) -> Optional[File]:
-        """更新文件信息"""
-        file = await self.get_by_id(file_id)
-        if file:
-            for field, value in update_data.items():
-                if hasattr(file, field):
-                    setattr(file, field, value)
-            await file.save()
-            return file
-        return None
+    async def get_by_uid(self, uid: str, tenant_id: str) -> Optional[File]:
+        """根据UID获取文件"""
+        return await File.find_one(
+            File.uid == uid, 
+            File.tenant_id == tenant_id,
+            File.status != Status.ARCHIVED
+        )
     
-    async def delete_file(self, file_id: str) -> bool:
+    async def get_by_id(self, object_id: PydanticObjectId) -> Optional[File]:
+        """根据ObjectId获取文件"""
+        return await File.get(object_id)
+    
+    async def save(self, file: File) -> File:
+        """保存文件（更新或创建）"""
+        await file.save()
+        return file
+    
+    async def delete(self, file: File) -> bool:
         """删除文件"""
-        file = await self.get_by_id(file_id)
-        if file:
-            await file.delete()
-            return True
-        return False
+        await file.delete()
+        return True
     
-    async def list_files(
-        self,
-        tenant_id: str,
-        skip: int = 0,
-        limit: int = 100,
-        sort_field: str = "created_at",
-        sort_order: str = "desc",
-        **filters
-    ) -> Tuple[List[File], int]:
-        """获取文件列表"""
-        query = self._build_query(tenant_id, filters)
-        
-        # 获取总数
-        total = await File.find(query).count()
-        
-        # 构建排序
-        sort_dir = DESCENDING if sort_order == "desc" else ASCENDING
-        
-        # 获取分页数据
-        files = await File.find(query).skip(skip).limit(limit).sort((sort_field, sort_dir)).to_list()
-        
-        return files, total
+    async def soft_delete(self, file: File) -> bool:
+        """软删除文件"""
+        file.status = Status.ARCHIVED
+        file.archived_at = get_current_timestamp()
+        file.updated_at = get_current_timestamp()
+        await file.save()
+        return True
     
-    async def list_by_file_type(self, tenant_id: str, file_type: FileTypeEnum, limit: int = 100) -> List[File]:
-        """根据文件类型获取文件列表"""
+    async def find_by_tenant(self, tenant_id: str, skip: int = 0, limit: int = 100) -> List[File]:
+        """根据租户ID查找文件"""
         return await File.find(
-            And(
-                Eq(File.tenant_id, tenant_id),
-                Eq(File.file_type, file_type),
-                Eq(File.status, "active")
-            )
-        ).limit(limit).sort(("created_at", DESCENDING)).to_list()
+            File.tenant_id == tenant_id,
+            File.status != Status.ARCHIVED
+        ).sort(-File.created_at).skip(skip).limit(limit).to_list()
     
-    async def list_by_status(self, tenant_id: str, file_status: UploadProcStatusEnum, limit: int = 100) -> List[File]:
-        """根据文件状态获取文件列表"""
+    async def find_by_filename(self, tenant_id: str, filename: str) -> Optional[File]:
+        """根据文件名查找文件"""
+        return await File.find_one(
+            File.tenant_id == tenant_id,
+            File.filename == filename,
+            File.status != Status.ARCHIVED
+        )
+    
+    async def find_by_storage_path(self, storage_bucket: str, storage_path: str) -> Optional[File]:
+        """根据存储路径查找文件"""
+        return await File.find_one(
+            File.storage_bucket == storage_bucket,
+            File.storage_path == storage_path,
+            File.status != Status.ARCHIVED
+        )
+    
+    async def find_by_file_type(self, tenant_id: str, file_type: FileTypeEnum, 
+                              skip: int = 0, limit: int = 100) -> List[File]:
+        """根据文件类型查找"""
         return await File.find(
-            And(
-                Eq(File.tenant_id, tenant_id),
-                Eq(File.file_status, file_status)
+            File.tenant_id == tenant_id,
+            File.file_type == file_type,
+            File.status != Status.ARCHIVED
+        ).sort(-File.created_at).skip(skip).limit(limit).to_list()
+    
+    async def find_by_status(self, tenant_id: str, status: Status, 
+                           skip: int = 0, limit: int = 100) -> List[File]:
+        """根据状态查找文件"""
+        return await File.find(
+            File.tenant_id == tenant_id,
+            File.status == status
+        ).sort(-File.created_at).skip(skip).limit(limit).to_list()
+    
+    async def find_by_proc_status(self, tenant_id: str, proc_status: FileProcStatusEnum,
+                                skip: int = 0, limit: int = 100) -> List[File]:
+        """根据处理状态查找文件"""
+        return await File.find(
+            File.tenant_id == tenant_id,
+            File.proc_status == proc_status,
+            File.status != Status.ARCHIVED
+        ).sort(-File.created_at).skip(skip).limit(limit).to_list()
+    
+    async def find_by_tags(self, tenant_id: str, tags: List[str], 
+                         skip: int = 0, limit: int = 100) -> List[File]:
+        """根据标签查找文件"""
+        return await File.find(
+            File.tenant_id == tenant_id,
+            File.status != Status.ARCHIVED,
+            In(File.tags, tags)
+        ).sort(-File.created_at).skip(skip).limit(limit).to_list()
+    
+    async def find_by_creator(self, tenant_id: str, created_by: str,
+                            skip: int = 0, limit: int = 100) -> List[File]:
+        """根据创建者查找文件"""
+        return await File.find(
+            File.tenant_id == tenant_id,
+            File.created_by == created_by,
+            File.status != Status.ARCHIVED
+        ).sort(-File.created_at).skip(skip).limit(limit).to_list()
+    
+    async def search_files(self, tenant_id: str, keyword: str, 
+                         skip: int = 0, limit: int = 100) -> List[File]:
+        """搜索文件"""
+        query = And(
+            File.tenant_id == tenant_id,
+            File.status != Status.ARCHIVED,
+            Or(
+                RegEx(File.filename, keyword, "i"),
+                RegEx(File.title, keyword, "i"),
+                RegEx(File.desc, keyword, "i")
             )
-        ).limit(limit).sort(("created_at", DESCENDING)).to_list()
+        )
+        return await File.find(query).sort(-File.created_at).skip(skip).limit(limit).to_list()
     
-    async def increment_download_count(self, file_id: str) -> Optional[File]:
-        """增加文件下载次数"""
-        file = await self.get_by_id(file_id)
-        if file:
-            file.download_count += 1
-            await file.save()
-            return file
-        return None
-    
-    async def update_file_status(self, file_id: str, status: UploadProcStatusEnum, error_info: Dict[str, Any] = None) -> Optional[File]:
-        """更新文件状态"""
-        update_data = {"file_status": status}
-        if error_info:
-            update_data["error_info"] = error_info
-        
-        return await self.update_file(file_id, update_data)
-    
-    async def get_file_stats(self, tenant_id: str) -> Dict[str, Any]:
-        """获取文件统计信息"""
-        # 总文件数和大小
-        total_files = await File.find(Eq(File.tenant_id, tenant_id)).count()
-        
-        # 按文件类型统计
-        pipeline = [
-            {"$match": {"tenant_id": tenant_id}},
-            {"$group": {
-                "_id": "$file_type",
-                "count": {"$sum": 1},
-                "total_size": {"$sum": "$file_size"}
-            }}
+    async def advanced_search(self, tenant_id: str, **filters) -> List[File]:
+        """高级搜索"""
+        conditions = [
+            File.tenant_id == tenant_id,
+            File.status != Status.ARCHIVED
         ]
         
-        stats_by_type = {}
-        async for result in File.aggregate(pipeline):
-            stats_by_type[result["_id"]] = {
-                "count": result["count"],
-                "total_size": result["total_size"]
+        # 动态构建查询条件
+        for field, value in filters.items():
+            if value is not None:
+                if hasattr(File, field):
+                    if isinstance(value, str) and field in ['filename', 'title', 'desc', 'content_type']:
+                        conditions.append(RegEx(getattr(File, field), value, "i"))
+                    elif isinstance(value, list) and field == 'tags':
+                        conditions.append(In(getattr(File, field), value))
+                    else:
+                        conditions.append(getattr(File, field) == value)
+        
+        query = And(*conditions) if len(conditions) > 1 else conditions[0]
+        return await File.find(query).sort(-File.created_at).to_list()
+    
+    async def count_by_tenant(self, tenant_id: str) -> int:
+        """统计租户的文件数量"""
+        return await File.find(
+            File.tenant_id == tenant_id,
+            File.status != Status.ARCHIVED
+        ).count()
+    
+    async def count_by_file_type(self, tenant_id: str, file_type: FileTypeEnum) -> int:
+        """统计指定类型的文件数量"""
+        return await File.find(
+            File.tenant_id == tenant_id,
+            File.file_type == file_type,
+            File.status != Status.ARCHIVED
+        ).count()
+    
+    async def count_by_status(self, tenant_id: str, status: Status) -> int:
+        """统计指定状态的文件数量"""
+        return await File.find(
+            File.tenant_id == tenant_id,
+            File.status == status
+        ).count()
+    
+    async def get_total_size_by_tenant(self, tenant_id: str) -> int:
+        """获取租户文件总大小"""
+        pipeline = [
+            {
+                "$match": {
+                    "tenant_id": tenant_id,
+                    "status": {"$ne": Status.ARCHIVED.value}
+                }
+            },
+            {
+                "$group": {
+                    "_id": None,
+                    "total_size": {"$sum": "$file_size"}
+                }
             }
-        
-        # 按状态统计
-        pipeline = [
-            {"$match": {"tenant_id": tenant_id}},
-            {"$group": {
-                "_id": "$file_status",
-                "count": {"$sum": 1}
-            }}
         ]
         
-        stats_by_status = {}
-        async for result in File.aggregate(pipeline):
-            stats_by_status[result["_id"]] = result["count"]
+        result = await File.aggregate(pipeline).to_list()
+        return result[0]["total_size"] if result else 0
+    
+    async def increment_download_count(self, file: File) -> File:
+        """增加文件下载次数"""
+        file.download_count += 1
+        file.updated_at = get_current_timestamp()
+        await file.save()
+        return file
+    
+    async def update_proc_status(self, file: File, proc_status: FileProcStatusEnum, 
+                               proc_meta: Optional[Dict[str, Any]] = None) -> File:
+        """更新文件处理状态"""
+        file.proc_status = proc_status
+        file.updated_at = get_current_timestamp()
         
-        # 总文件大小
-        pipeline = [
-            {"$match": {"tenant_id": tenant_id}},
-            {"$group": {
-                "_id": None,
-                "total_size": {"$sum": "$file_size"}
-            }}
-        ]
+        if proc_meta is not None:
+            file.proc_meta = proc_meta
         
-        total_size = 0
-        async for result in File.aggregate(pipeline):
-            total_size = result["total_size"]
+        await file.save()
+        return file
+    
+    async def bulk_update_proc_status(self, files: List[File], proc_status: FileProcStatusEnum) -> int:
+        """批量更新文件处理状态"""
+        updated_count = 0
+        for file in files:
+            file.proc_status = proc_status
+            file.updated_at = get_current_timestamp()
+            await file.save()
+            updated_count += 1
+        
+        return updated_count
+
+
+class FileLogRepository:
+    """文件日志仓库类 - 专注于FileLog模型的数据操作"""
+    
+    async def create(self, file_log: FileLog) -> FileLog:
+        """创建文件日志"""
+        await file_log.insert()
+        return file_log
+    
+    async def get_by_id(self, object_id: PydanticObjectId) -> Optional[FileLog]:
+        """根据ObjectId获取日志"""
+        return await FileLog.get(object_id)
+    
+    async def get_by_master_id(self, master_id: str, tenant_id: str, 
+                             skip: int = 0, limit: int = 100) -> List[FileLog]:
+        """根据文件ID获取操作日志"""
+        return await FileLog.find(
+            FileLog.master_id == master_id,
+            FileLog.tenant_id == tenant_id
+        ).sort(-FileLog.operation_time).skip(skip).limit(limit).to_list()
+    
+    async def get_by_operation(self, tenant_id: str, operation: str,
+                             skip: int = 0, limit: int = 100) -> List[FileLog]:
+        """根据操作类型获取日志"""
+        return await FileLog.find(
+            FileLog.tenant_id == tenant_id,
+            FileLog.operation == operation
+        ).sort(-FileLog.operation_time).skip(skip).limit(limit).to_list()
+    
+    async def get_by_operator(self, tenant_id: str, operated_by: str,
+                            skip: int = 0, limit: int = 100) -> List[FileLog]:
+        """根据操作者获取日志"""
+        return await FileLog.find(
+            FileLog.tenant_id == tenant_id,
+            FileLog.operated_by == operated_by
+        ).sort(-FileLog.operation_time).skip(skip).limit(limit).to_list()
+    
+    async def get_recent_operations(self, tenant_id: str, limit: int = 50) -> List[FileLog]:
+        """获取最近的操作日志"""
+        return await FileLog.find(
+            FileLog.tenant_id == tenant_id
+        ).sort(-FileLog.operation_time).limit(limit).to_list()
+    
+    async def count_by_master_id(self, master_id: str, tenant_id: str) -> int:
+        """统计文件的日志数量"""
+        return await FileLog.find(
+            FileLog.master_id == master_id,
+            FileLog.tenant_id == tenant_id
+        ).count()
+    
+    async def count_by_operation(self, tenant_id: str, operation: str) -> int:
+        """统计指定操作的日志数量"""
+        return await FileLog.find(
+            FileLog.tenant_id == tenant_id,
+            FileLog.operation == operation
+        ).count()
+
+
+class FileStatisticsService:
+    """文件统计服务 - 专注于统计相关的数据操作"""
+    
+    def __init__(self, file_repo: FileRepository):
+        self.file_repo = file_repo
+    
+    async def get_tenant_statistics(self, tenant_id: str) -> Dict[str, Any]:
+        """获取租户文件统计"""
+        # 获取基本统计
+        total_files = await self.file_repo.count_by_tenant(tenant_id)
+        total_size = await self.file_repo.get_total_size_by_tenant(tenant_id)
+        
+        # 获取文件类型分布
+        file_type_distribution = {}
+        for file_type in FileTypeEnum:
+            count = await self.file_repo.count_by_file_type(tenant_id, file_type)
+            if count > 0:
+                file_type_distribution[file_type] = count
+        
+        # 获取状态分布
+        status_distribution = {}
+        for status in Status:
+            count = await self.file_repo.count_by_status(tenant_id, status)
+            if count > 0:
+                status_distribution[status] = count
+        
+        # 获取处理状态分布
+        proc_status_distribution = {}
+        files = await self.file_repo.find_by_tenant(tenant_id, limit=1000)  # 限制数量避免内存问题
+        for file in files:
+            proc_status = file.proc_status
+            proc_status_distribution[proc_status] = proc_status_distribution.get(proc_status, 0) + 1
+        
+        # 获取可见性分布
+        visibility_distribution = {}
+        for file in files:
+            visibility = file.visibility
+            visibility_distribution[visibility] = visibility_distribution.get(visibility, 0) + 1
         
         return {
             "total_files": total_files,
             "total_size": total_size,
-            "by_file_type": stats_by_type,
-            "by_status": stats_by_status
+            "file_type_distribution": file_type_distribution,
+            "status_distribution": status_distribution,
+            "proc_status_distribution": proc_status_distribution,
+            "visibility_distribution": visibility_distribution
         }
     
-    def _build_query(self, tenant_id: str, filters: Dict[str, Any]) -> Any:
-        """构建查询条件"""
-        query_filters = [Eq(File.tenant_id, tenant_id)]
-        
-        if filters.get("title"):
-            query_filters.append(RegEx(File.title, f".*{filters['title']}.*", "i"))
-        
-        if filters.get("original_filename"):
-            query_filters.append(RegEx(File.original_filename, f".*{filters['original_filename']}.*", "i"))
-        
-        if filters.get("file_type"):
-            query_filters.append(Eq(File.file_type, filters["file_type"]))
-        
-        if filters.get("file_status"):
-            query_filters.append(Eq(File.file_status, filters["file_status"]))
-        
-        if filters.get("content_type"):
-            query_filters.append(RegEx(File.content_type, f".*{filters['content_type']}.*", "i"))
-        
-        if filters.get("category"):
-            query_filters.append(Eq(File.category, filters["category"]))
-        
-        if filters.get("tags"):
-            query_filters.append(In(File.tags, filters["tags"]))
-        
-        if filters.get("created_by"):
-            query_filters.append(Eq(File.created_by, filters["created_by"]))
-        
-        if filters.get("visibility"):
-            query_filters.append(Eq(File.visibility, filters["visibility"]))
-        
-        if filters.get("min_size") is not None:
-            query_filters.append(GTE(File.file_size, filters["min_size"]))
-        
-        if filters.get("max_size") is not None:
-            query_filters.append(LTE(File.file_size, filters["max_size"]))
-        
-        if filters.get("start_date"):
-            query_filters.append(GTE(File.created_at, filters["start_date"].isoformat()))
-        
-        if filters.get("end_date"):
-            query_filters.append(LTE(File.created_at, filters["end_date"].isoformat()))
-        
-        return And(*query_filters) if len(query_filters) > 1 else query_filters[0]
-
-
-class FileLogRepository:
-    """文件日志数据仓库 - 直接数据操作"""
-    
-    def __init__(self):
-        self.database = mongodb.database
-    
-    async def create_log(self, log_data: Dict[str, Any]) -> FileLog:
-        """创建文件操作日志"""
-        log = FileLog(**log_data)
-        await log.insert()
-        return log
-    
-    async def get_logs_by_file(self, file_id: str, limit: int = 100) -> List[FileLog]:
-        """根据文件ID获取操作日志"""
-        return await FileLog.find(
-            Eq(FileLog.master_id, file_id)
-        ).limit(limit).sort(("operation_time", DESCENDING)).to_list()
-    
-    async def get_logs_by_operation(self, tenant_id: str, operation: str, limit: int = 100) -> List[FileLog]:
-        """根据操作类型获取日志"""
-        return await FileLog.find(
-            And(
-                Eq(FileLog.tenant_id, tenant_id),
-                Eq(FileLog.operation, operation)
-            )
-        ).limit(limit).sort(("operation_time", DESCENDING)).to_list()
-    
-    async def list_logs(
-        self,
-        tenant_id: str,
-        skip: int = 0,
-        limit: int = 100,
-        sort_field: str = "operation_time",
-        sort_order: str = "desc",
-        **filters
-    ) -> Tuple[List[FileLog], int]:
-        """获取日志列表"""
-        query = self._build_query(tenant_id, filters)
-        
-        # 获取总数
-        total = await FileLog.find(query).count()
-        
-        # 构建排序
-        sort_dir = DESCENDING if sort_order == "desc" else ASCENDING
-        
-        # 获取分页数据
-        logs = await FileLog.find(query).skip(skip).limit(limit).sort((sort_field, sort_dir)).to_list()
-        
-        return logs, total
-    
-    async def get_operation_stats(self, tenant_id: str, days: int = 30) -> Dict[str, Any]:
-        """获取操作统计信息"""
-        start_date = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-        start_date = start_date.replace(day=start_date.day - days)
-        
-        # 按操作类型统计
+    async def get_daily_upload_stats(self, tenant_id: str, days: int = 30) -> List[Dict[str, Any]]:
+        """获取每日上传统计"""
         pipeline = [
-            {"$match": {
-                "tenant_id": tenant_id,
-                "operation_time": {"$gte": start_date}
-            }},
-            {"$group": {
-                "_id": "$operation",
-                "count": {"$sum": 1}
-            }}
+            {
+                "$match": {
+                    "tenant_id": tenant_id,
+                    "status": {"$ne": Status.ARCHIVED.value},
+                    "created_at": {
+                        "$gte": get_current_timestamp().replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=days)
+                    }
+                }
+            },
+            {
+                "$group": {
+                    "_id": {
+                        "$dateToString": {
+                            "format": "%Y-%m-%d",
+                            "date": "$created_at"
+                        }
+                    },
+                    "count": {"$sum": 1},
+                    "total_size": {"$sum": "$file_size"}
+                }
+            },
+            {
+                "$sort": {"_id": 1}
+            }
         ]
         
-        stats_by_operation = {}
-        async for result in FileLog.aggregate(pipeline):
-            stats_by_operation[result["_id"]] = result["count"]
-        
-        # 按用户统计
-        pipeline = [
-            {"$match": {
-                "tenant_id": tenant_id,
-                "operation_time": {"$gte": start_date}
-            }},
-            {"$group": {
-                "_id": "$operated_by",
-                "count": {"$sum": 1}
-            }},
-            {"$sort": {"count": -1}},
-            {"$limit": 10}
-        ]
-        
-        stats_by_user = {}
-        async for result in FileLog.aggregate(pipeline):
-            stats_by_user[result["_id"]] = result["count"]
-        
-        return {
-            "total_operations": sum(stats_by_operation.values()),
-            "by_operation_type": stats_by_operation,
-            "by_user": stats_by_user
-        }
-    
-    def _build_query(self, tenant_id: str, filters: Dict[str, Any]) -> Any:
-        """构建查询条件"""
-        query_filters = [Eq(FileLog.tenant_id, tenant_id)]
-        
-        if filters.get("operation"):
-            query_filters.append(Eq(FileLog.operation, filters["operation"]))
-        
-        if filters.get("operated_by"):
-            query_filters.append(Eq(FileLog.operated_by, filters["operated_by"]))
-        
-        if filters.get("master_id"):
-            query_filters.append(Eq(FileLog.master_id, filters["master_id"]))
-        
-        if filters.get("start_date"):
-            query_filters.append(GTE(FileLog.operation_time, filters["start_date"]))
-        
-        if filters.get("end_date"):
-            query_filters.append(LTE(FileLog.operation_time, filters["end_date"]))
-        
-        return And(*query_filters) if len(query_filters) > 1 else query_filters[0]
+        return await File.aggregate(pipeline).to_list()
+
+
+# 创建全局实例
+file_repository = FileRepository()
+file_log_repository = FileLogRepository()
+file_statistics_service = FileStatisticsService(file_repository)

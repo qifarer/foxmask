@@ -25,13 +25,14 @@ from foxmask.knowledge.repositories import (
     knowledge_item_chunk_repository,
 )
 from foxmask.file.repositories import get_repository_manager
-from foxmask.file.enums import FileTypeEnum, UploadProcStatusEnum
+from foxmask.file.enums import FileTypeEnum, UploadProcStatusEnum,FileProcStatusEnum
 from foxmask.core.exceptions import (
     ValidationException, NotFoundException, DuplicateException, ServiceException
 )
 from foxmask.utils.minio_client import minio_client
 from foxmask.utils.mineru_parser import MineruParser, BackendType, ParseMethod
 from foxmask.utils.chunk_content import chunk_markdown_content
+from foxmask.utils.helpers import get_today_str
 
 class KnowledgeItemService:
     def __init__(self):
@@ -146,6 +147,7 @@ class KnowledgeItemService:
             logger.error(f"Failed to create knowledge item with infos: {str(e)}")
             raise ServiceException(f"Failed to create knowledge item with infos: {str(e)}")
     
+    
     async def create_item_from_file(
         self, 
         tenant_id: str, 
@@ -156,23 +158,23 @@ class KnowledgeItemService:
         
         try:
             # 获取文件对象
-            file = await self.file_repository .get_file_by_file_id(file_id)
-            if not file:
+            file_entity = await self.file_repository.get_by_uid(tenant_id=tenant_id,uid=file_id)
+            if not file_entity:
                 raise NotFoundException("File", file_id)
             
-            if file.file_type != FileTypeEnum.PDF:
-                raise ValidationException(f"文件类型不支持: {file.file_type}")
+            if file_entity.file_type != FileTypeEnum.DOCUMENT:
+                raise ValidationException(f"文件类型不支持: {file_entity.file_type}")
         
-            if file.status != UploadProcStatusEnum.UPLOADED:
-                raise ValidationException(f"文件状态异常: {file.status}")
+            if file_entity.status != Status.ACTIVE:
+                raise ValidationException(f"文件状态异常: {file_entity.status}")
             
             # 检查是否已存在
             existing_item = await knowledge_item_repository.get_by_source_id(source_id=file_id, tenant_id=tenant_id)
             if existing_item:
                 raise DuplicateException("KnowledgeItem", f"source_id:{file_id}")
             
-            bucket_name = file.minio_bucket    
-            object_name = file.minio_object_name
+            bucket_name = file_entity.storage_bucket    
+            object_name = file_entity.storage_path
             
             if not bucket_name or not object_name:
                 raise ValidationException(f"文件存储地址错误：{file_id}")
@@ -180,7 +182,7 @@ class KnowledgeItemService:
             # 创建临时文件路径
             temp_dir = f"/tmp/{tenant_id}"
             os.makedirs(temp_dir, exist_ok=True)
-            temp_file_path = f"{temp_dir}/{file_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+            temp_file_path = f"{temp_dir}/{file_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}{file_entity.extension}"
             
             try:
                 # 从MinIO下载文件
@@ -214,27 +216,27 @@ class KnowledgeItemService:
                 # 使用DTO创建知识条目
                 item_create_dto = KnowledgeItemCreateDTO(
                     uid=str(uuid4()),
-                    tenant_id=file.tenant_id,
+                    tenant_id=file_entity.tenant_id,
                     item_type=KnowledgeItemTypeEnum.FILE,
                     source_id=file_id,
-                    title=file.filename,
-                    desc=file.description,
+                    title=file_entity.filename,
+                    desc=file_entity.desc,
                     metadata={
-                        "type": file.filename,
-                        "name": file.minio_object_name,
-                        "path": file.minio_bucket,
-                        "url": file.url,
+                        "type": file_entity.filename,
+                        "name": file_entity.storage_bucket,
+                        "path": file_entity.storage_path,
+                        "url": "",
                         "keyword": file_id,
-                        "size": file.file_size,
-                        "updateAt": file.created_at,      
+                        "size": file_entity.file_size,
+                        "updateAt": file_entity.created_at,      
                     },
                     tags=["FILE"],
                     note="Created from PDF file",
                     visibility=Visibility.PUBLIC,
                     status=Status.DRAFT,
                     created_by="SYSTEM",
-                    allowed_users=file.allowed_users,
-                    allowed_roles=file.allowed_roles
+                    allowed_users=file_entity.allowed_users,
+                    allowed_roles=file_entity.allowed_roles
                 )
    
                 # 创建知识内容
@@ -267,14 +269,14 @@ class KnowledgeItemService:
                     raise ServiceException(f"创建知识条目状态更新失败: {item_dto.uid}")
                 
                 # 更新文件状态为完成
-                await self.file_repository.update_file_status(file_id=file_id, status=UploadProcStatusEnum.COMPLETED)
+                # await self.file_repository.update_proc_status(file_entity, proc_status=FileProcStatusEnum.COMPLETED)
                 
                 logger.info(f"Successfully created knowledge item from file: {file_id}")
                 return updated_item, infos_dto
                 
             except Exception as e:
                 logger.error(f"Error processing file {file_id}: {str(e)}")
-                await self.file_repository.update_file_status(file_id=file_id, status=UploadProcStatusEnum.FAILED)
+                # await self.file_repository.update_proc_status(file_entity, status=FileProcStatusEnum.FAILED)
                 raise ServiceException(f"文件处理失败: {str(e)}")
                 
         except (NotFoundException, ValidationException, DuplicateException, ServiceException):

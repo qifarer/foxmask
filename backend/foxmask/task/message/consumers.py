@@ -19,7 +19,7 @@ from .schemas import (
     SystemEventMessage,
     BizDataSyncMessage
 )
-from foxmask.knowledge.services import knowledge_processing_service
+from .processing import processing_service
 from foxmask.task.services import task_service
 from .dead_letter_processor import dead_letter_processor
 from foxmask.tag.services import tag_service
@@ -127,7 +127,7 @@ class AIOTaskConsumer:
         """处理知识处理消息"""
         message_id = message_data.get("message_id", "")
         logger.info(f"Processing knowledge message: {message_id}")
-        await knowledge_processing_service.process_knowledge(message_data)
+        await processing_service.process_knowledge(message_data)
 
     async def process_notification_message(self, message_data: Dict[str, Any]):
         """处理通知消息"""

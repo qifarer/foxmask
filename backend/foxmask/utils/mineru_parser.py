@@ -18,6 +18,8 @@ from mineru.backend.pipeline.model_json_to_middle_json import result_to_middle_j
 from mineru.backend.vlm.vlm_middle_json_mkcontent import union_make as vlm_union_make
 from mineru.utils.guess_suffix_or_lang import guess_suffix_by_path
 from foxmask.utils.minio_client import minio_client
+from foxmask.utils.helpers import generate_storage_path
+from foxmask.core.config import settings
 
 class BackendType(Enum):
     """解析后端类型"""
@@ -191,8 +193,14 @@ class MineruParser:
                 #  pdf_info = middle_json["pdf_info"]
                 # pdf_bytes = pdf_bytes_list[idx]
                 results.append(middle_json)
+                bucket_name = settings.MINIO_BUCKET_PUBLIC
+                object_name = generate_storage_path(
+                    access="public",
+                    base_path="file",
+                    tenant_id="foxmask",
+                    file_name=local_image_dir)
                 try:
-                    minio_client.upload_directory("public-bucket",local_image_dir)
+                    minio_client.upload_directory(bucket_name,object_name)
                 except Exception as e:
                     pass    
                 

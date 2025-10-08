@@ -1,14 +1,20 @@
 # -*- coding: utf-8 -*-
-# foxmask/file/mappers/upload_mapper.py
+# foxmask/file/service/upload_mapper.py
 from datetime import datetime
-from typing import List, Optional, Dict, Any, Union
+from typing import List, Optional, Dict, Any
 from dataclasses import dataclass
 
-from foxmask.file.models.upload import UploadTask, UploadTaskFile, UploadTaskFileChunk
-from foxmask.file.dtos.upload import *
-from foxmask.utils.helpers import get_current_timestamp, generate_uuid
 from foxmask.core.enums import Status, Visibility
-from foxmask.file.enums import UploadProcStatusEnum, UploadSourceTypeEnum, UploadStrategyEnum, FileTypeEnum
+from foxmask.file.dtos.upload import *
+from foxmask.file.enums import (
+    FileTypeEnum, 
+    UploadProcStatusEnum, 
+    UploadSourceTypeEnum, 
+    UploadStrategyEnum
+)
+from foxmask.file.models.upload import UploadTask, UploadTaskFile, UploadTaskFileChunk
+from foxmask.utils.helpers import generate_storage_path, generate_uuid, get_current_timestamp
+
 
 class UploadMapper:
     """上传模块统一的 Mapper 层"""
@@ -26,7 +32,7 @@ class UploadMapper:
             files_dto = [UploadMapper.entity_to_upload_task_file_dto(file_entity) for file_entity in entity.files]
         
         return UploadTaskDTO(
-            # Base fields
+            # 基础字段
             uid=entity.uid,
             tenant_id=entity.tenant_id,
             title=entity.title,
@@ -46,7 +52,7 @@ class UploadMapper:
             error_info=entity.error_info,
             metadata=entity.metadata,
             
-            # Upload specific fields
+            # 上传特定字段
             proc_status=entity.proc_status,
             source_type=entity.source_type,
             source_paths=entity.source_paths or [],
@@ -59,7 +65,7 @@ class UploadMapper:
             file_type_filters=entity.file_type_filters or [],
             max_file_size=entity.max_file_size,
             
-            # Progress fields
+            # 进度字段
             discovered_files=entity.discovered_files,
             processing_files=entity.processing_files,
             total_files=entity.total_files,
@@ -68,11 +74,11 @@ class UploadMapper:
             total_size=entity.total_size,
             uploaded_size=entity.uploaded_size,
             
-            # Timestamps
+            # 时间戳
             discovery_started_at=entity.discovery_started_at,
             discovery_completed_at=entity.discovery_completed_at,
             
-            # Nested objects
+            # 嵌套对象
             files=files_dto
         )
     
@@ -87,7 +93,7 @@ class UploadMapper:
             chunks_dto = [UploadMapper.entity_to_upload_task_file_chunk_dto(chunk_entity) for chunk_entity in entity.chunks]
         
         return UploadTaskFileDTO(
-            # Base fields
+            # 基础字段
             uid=entity.uid,
             tenant_id=entity.tenant_id,
             master_id=entity.master_id,
@@ -95,7 +101,7 @@ class UploadMapper:
             created_at=entity.created_at,
             updated_at=entity.updated_at,
             
-            # File specific fields
+            # 文件特定字段
             proc_status=entity.proc_status,
             original_path=entity.original_path,
             storage_path=entity.storage_path,
@@ -129,7 +135,7 @@ class UploadMapper:
             upload_started_at=entity.upload_started_at,
             upload_completed_at=entity.upload_completed_at,
             
-            # Nested objects
+            # 嵌套对象
             chunks=chunks_dto
         )
     
@@ -140,7 +146,7 @@ class UploadMapper:
             return None
             
         return UploadTaskFileChunkDTO(
-            # Base fields
+            # 基础字段
             uid=entity.uid,
             tenant_id=entity.tenant_id,
             master_id=entity.master_id,
@@ -148,7 +154,7 @@ class UploadMapper:
             created_at=entity.created_at,
             updated_at=entity.updated_at,
             
-            # Chunk specific fields
+            # 分块特定字段
             proc_status=entity.proc_status,
             file_id=entity.file_id,
             chunk_number=entity.chunk_number,
@@ -177,18 +183,18 @@ class UploadMapper:
         uid = generate_uuid()
         
         return UploadTask(
-            # Base fields
+            # 基础字段
             uid=uid,
             tenant_id=dto.tenant_id,
             created_by=dto.created_by,
             title=dto.title,
             desc=dto.desc,
-            status=Status.DRAFT,  # ✅ 使用枚举
-            visibility=Visibility.PUBLIC,  # ✅ 使用枚举
+            status=Status.DRAFT,
+            visibility=Visibility.PUBLIC,
             created_at=now,
             updated_at=now,
             
-            # Upload specific fields
+            # 上传特定字段
             proc_status=UploadProcStatusEnum.PENDING,
             source_type=dto.source_type,
             source_paths=dto.source_paths,
@@ -201,7 +207,7 @@ class UploadMapper:
             file_type_filters=dto.file_type_filters or [],
             max_file_size=dto.max_file_size,
             
-            # Progress fields (初始化为0)
+            # 进度字段（初始化为0）
             discovered_files=0,
             processing_files=0,
             total_files=0,
@@ -216,28 +222,28 @@ class UploadMapper:
         dto: InitializeUploadFileInputDTO, 
         task_id: str, 
         tenant_id: str,
-        storage_path: str = ""  # ✅ 添加存储路径参数
+        file_id: str,
+        storage_path: str = "",
     ) -> UploadTaskFile:
         """InitializeUploadFileInputDTO 转 UploadTaskFile Entity"""
         if not dto:
             return None
             
         now = get_current_timestamp()
-        uid = generate_uuid()
         total_chunks = (dto.file_size + dto.chunk_size - 1) // dto.chunk_size
         
         return UploadTaskFile(
-            # Base fields
-            uid=uid,
+            # 基础字段
+            uid=file_id,
             tenant_id=tenant_id,
             master_id=task_id,
             created_at=now,
             updated_at=now,
             
-            # File specific fields
+            # 文件特定字段
             proc_status=UploadProcStatusEnum.PENDING,
             original_path=dto.original_path,
-            storage_path=storage_path,  # ✅ 使用传入的存储路径
+            storage_path=storage_path,
             filename=dto.filename,
             file_size=dto.file_size,
             file_type=dto.file_type,
@@ -269,14 +275,14 @@ class UploadMapper:
         uid = generate_uuid()
         
         return UploadTaskFileChunk(
-            # Base fields
+            # 基础字段
             uid=uid,
             tenant_id=tenant_id,
             master_id=dto.task_id,
             created_at=now,
             updated_at=now,
             
-            # Chunk specific fields
+            # 分块特定字段
             proc_status=UploadProcStatusEnum.PENDING,
             file_id=dto.file_id,
             chunk_number=dto.chunk_number,
@@ -329,7 +335,7 @@ class UploadMapper:
                 update_dict[field] = value
         
         # 更新时间戳
-        update_dict['updated_at'] = get_current_timestamp()  # ✅ 使用统一的时间函数
+        update_dict['updated_at'] = get_current_timestamp()
         
         return update_dict
     
@@ -352,7 +358,7 @@ class UploadMapper:
                 update_dict[field] = value
         
         # 更新时间戳
-        update_dict['updated_at'] = get_current_timestamp()  # ✅ 使用统一的时间函数
+        update_dict['updated_at'] = get_current_timestamp()
         
         return update_dict
     
@@ -365,7 +371,7 @@ class UploadMapper:
         update_dict = {}
         fields = [
             'proc_status', 'uploaded_chunks', 'current_chunk', 'progress',
-            'upload_speed', 'estimated_time_remaining', 'minio_etag',  # ✅ 添加minio_etag
+            'upload_speed', 'estimated_time_remaining', 'minio_etag',
             'checksum_md5', 'checksum_sha256', 'extracted_metadata', 
             'upload_started_at', 'upload_completed_at', 'note'
         ]
@@ -376,7 +382,7 @@ class UploadMapper:
                 update_dict[field] = value
         
         # 更新时间戳
-        update_dict['updated_at'] = get_current_timestamp()  # ✅ 使用统一的时间函数
+        update_dict['updated_at'] = get_current_timestamp()
         
         return update_dict
     
@@ -470,7 +476,11 @@ class UploadMapper:
         if file_entities:
             current_uploading_files = [
                 file_entity.filename for file_entity in file_entities 
-                if file_entity.proc_status in [UploadProcStatusEnum.UPLOADING, UploadProcStatusEnum.PROCESSING, UploadProcStatusEnum.PENDING]
+                if file_entity.proc_status in [
+                    UploadProcStatusEnum.UPLOADING, 
+                    UploadProcStatusEnum.PROCESSING, 
+                    UploadProcStatusEnum.PENDING
+                ]
             ]
         
         return UploadProgressDTO(
@@ -478,7 +488,7 @@ class UploadMapper:
             total_files=task_entity.total_files,
             completed_files=task_entity.completed_files,
             failed_files=task_entity.failed_files,
-            processing_files=task_entity.processing_files,  # ✅ 添加processing_files字段
+            processing_files=task_entity.processing_files,
             progress_percentage=progress_percentage,
             uploaded_size=task_entity.uploaded_size,
             total_size=task_entity.total_size,
